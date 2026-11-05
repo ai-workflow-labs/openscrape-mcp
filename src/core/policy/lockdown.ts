@@ -98,8 +98,66 @@ function configPath(): string {
   return process.env.OPENSCRAPE_LOCKDOWN?.trim() || join(DATA_DIR, 'lockdown.json');
 }
 
+/**
+ * The preset for a shared deployment.
+ *
+ * Hosting this for a team changes which defaults are safe. On a laptop,
+ * reading a local file or running a page script is the user acting on their own
+ * machine. On a shared host those same capabilities let anyone with a token
+ * read the server's filesystem and run code in its browser.
+ *
+ * `OPENSCRAPE_MODE=hosted` turns the dangerous ones off in one switch, because
+ * getting six environment variables individually right is a thing people do
+ * not reliably do. A lockdown file still wins over this, key by key, so an
+ * operator can hand one capability back deliberately.
+ */
+const HOSTED_DEFAULTS: LockdownConfig = {
+  allowFileParse: false,
+  allowExecuteJavascript: false,
+  allowPrivateTargets: false,
+  requireRobots: true,
+  note: 'Shared deployment (OPENSCRAPE_MODE=hosted). Local file reads and page scripts are off.',
+};
+
+function hostedMode(): boolean {
+  return (process.env.OPENSCRAPE_MODE ?? '').trim().toLowerCase() === 'hosted';
+}
+
 function load(): LoadedState {
   if (state) return state;
+
+  /**
+   * Inline policy, for platforms where mounting a file is awkward.
+   *
+   * On Render, Fly or Railway the config would otherwise have to be baked into
+   * the image or committed — and a policy naming your internal hosts is not
+   * something to commit. An env var keeps it out of the repo and out of the
+   * image. Checked before the file so a platform override is unambiguous.
+   */
+  const inline = process.env.OPENSCRAPE_LOCKDOWN_JSON?.trim();
+  if (inline) {
+    try {
+      const parsed: unknown = JSON.parse(inline);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('expected a JSON object');
+      }
+      const config = hostedMode()
+        ? { ...HOSTED_DEFAULTS, ...(parsed as LockdownConfig) }
+        : (parsed as LockdownConfig);
+      log.info('lockdown from OPENSCRAPE_LOCKDOWN_JSON', { rules: Object.keys(config).length });
+      state = { path: 'OPENSCRAPE_LOCKDOWN_JSON', config, fatal: null };
+    } catch (err) {
+      // Same fail-closed rule as the file: a policy that will not parse must
+      // not quietly become no policy.
+      state = {
+        path: 'OPENSCRAPE_LOCKDOWN_JSON',
+        config: null,
+        fatal: `OPENSCRAPE_LOCKDOWN_JSON is not valid JSON: ${String(err)}. Refusing everything until it is fixed.`,
+      };
+      log.warn('inline lockdown unusable, failing closed', String(err));
+    }
+    return state;
+  }
 
   const path = configPath();
   const explicit = Boolean(process.env.OPENSCRAPE_LOCKDOWN?.trim());
@@ -107,13 +165,20 @@ function load(): LoadedState {
   if (!existsSync(path)) {
     // An explicitly named file that is not there is a misconfiguration, not an
     // absence: the operator meant to lock this down and the lock is missing.
-    state = explicit
-      ? {
-          path,
-          config: null,
-          fatal: `OPENSCRAPE_LOCKDOWN points at ${path}, which does not exist. Refusing everything until the file is present or the variable is unset.`,
-        }
-      : { path: null, config: null, fatal: null };
+    if (explicit) {
+      state = {
+        path,
+        config: null,
+        fatal: `OPENSCRAPE_LOCKDOWN points at ${path}, which does not exist. Refusing everything until the file is present or the variable is unset.`,
+      };
+      return state;
+    }
+    if (hostedMode()) {
+      log.info('hosted mode: applying shared-deployment defaults', HOSTED_DEFAULTS);
+      state = { path: 'OPENSCRAPE_MODE=hosted', config: { ...HOSTED_DEFAULTS }, fatal: null };
+      return state;
+    }
+    state = { path: null, config: null, fatal: null };
     return state;
   }
 
@@ -132,8 +197,16 @@ function load(): LoadedState {
       log.warn('lockdown: unknown keys ignored', { path, keys: unknown });
     }
 
-    const config = parsed as LockdownConfig;
-    log.info('lockdown active', { path, rules: Object.keys(config).length });
+    // Hosted defaults underneath, the file's own keys on top: the operator can
+    // hand a capability back deliberately, but cannot lose one by forgetting
+    // to mention it.
+    const fromFile = parsed as LockdownConfig;
+    const config = hostedMode() ? { ...HOSTED_DEFAULTS, ...fromFile } : fromFile;
+    log.info('lockdown active', {
+      path,
+      rules: Object.keys(fromFile).length,
+      hostedDefaults: hostedMode(),
+    });
     state = { path, config, fatal: null };
   } catch (err) {
     state = {

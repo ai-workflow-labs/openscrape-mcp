@@ -4,7 +4,13 @@ import { getRaw, putRaw, getValidators, loadBody, markRevalidated } from '../cac
 import { log } from '../util/log.js';
 import type { FetchedPage, RenderMode, ScrapeOptions } from '../types.js';
 import type { ArchivedContent } from '../discover/archive.js';
-import { assertUrlAllowed, archiveAllowed, browserAllowed } from '../policy/lockdown.js';
+import {
+  assertUrlAllowed,
+  archiveAllowed,
+  browserAllowed,
+  privateTargetsAllowed,
+} from '../policy/lockdown.js';
+import { checkUrlCached, BlockedAddressError } from '../util/ssrf.js';
 
 export interface FetchOutcome {
   page: FetchedPage;
@@ -141,6 +147,25 @@ export async function fetchPage(url: string, opts: ScrapeOptions = {}): Promise<
   // comes through here — scrape, crawl, map, monitor — so this is the one place
   // the check has to be, and it throws rather than returning a soft failure.
   assertUrlAllowed(url);
+
+  // The SSRF gate. This matters most when the server is reachable by someone
+  // other than the person who started it: without it, any caller can have the
+  // server fetch http://169.254.169.254/ and read the host's cloud credentials,
+  // or sweep the private network it sits in. It lived only in the REST API
+  // until this server grew an MCP URL, which is exactly the deployment that
+  // needs it.
+  if (!privateTargetsAllowed()) {
+    const verdict = await checkUrlCached(url);
+    if (!verdict.ok) {
+      throw new BlockedAddressError(
+        `Refusing to fetch ${url}: ${verdict.reason}. This guard keeps a shared or remote ` +
+          'instance from being used to reach private addresses. To scrape your own localhost, ' +
+          'set OPENSCRAPE_ALLOW_PRIVATE_TARGETS=1, or allowPrivateTargets in the lockdown file.',
+        url,
+        verdict.reason ?? 'blocked',
+      );
+    }
+  }
 
   const render: RenderMode = opts.render ?? 'auto';
   const maxAge = opts.maxAge ?? 0;

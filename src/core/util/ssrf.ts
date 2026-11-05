@@ -105,6 +105,42 @@ export interface SsrfCheckResult {
   addresses?: string[];
 }
 
+/**
+ * Per-host verdict cache.
+ *
+ * Without it, enforcing this on every fetch adds a DNS lookup per page, which
+ * on a thousand-page crawl of one host is a thousand lookups to answer the
+ * same question. Kept short deliberately: a long TTL would let a name that has
+ * since been repointed at a private address keep its old pass. 60 seconds
+ * bounds that window while still collapsing a crawl into one lookup.
+ */
+const verdictCache = new Map<string, { result: SsrfCheckResult; at: number }>();
+const VERDICT_TTL_MS = 60_000;
+
+/** Classifies a URL, reusing a recent verdict for the same host. */
+export async function checkUrlCached(target: string): Promise<SsrfCheckResult> {
+  let key: string;
+  try {
+    const u = new URL(target);
+    key = `${u.protocol}//${u.hostname}`;
+  } catch {
+    return { ok: false, reason: 'unparseable URL' };
+  }
+
+  const hit = verdictCache.get(key);
+  if (hit && Date.now() - hit.at < VERDICT_TTL_MS) return hit.result;
+
+  const result = await checkUrlReachability(target);
+  verdictCache.set(key, { result, at: Date.now() });
+
+  // Bound the map so a crawl across many hosts cannot grow it without limit.
+  if (verdictCache.size > 4096) {
+    const oldest = verdictCache.keys().next().value;
+    if (oldest !== undefined) verdictCache.delete(oldest);
+  }
+  return result;
+}
+
 /** Classifies a URL without throwing. */
 export async function checkUrlReachability(target: string): Promise<SsrfCheckResult> {
   let u: URL;

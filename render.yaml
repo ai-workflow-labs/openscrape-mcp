@@ -1,0 +1,71 @@
+# Render Blueprint for a shared OpenScrape instance.
+#
+#   1. Push this file (it is already in the repo).
+#   2. Render dashboard -> New -> Blueprint -> pick this repo.
+#   3. Set OPENSCRAPE_MCP_TOKENS in the dashboard (it is marked sync:false, so
+#      Render asks instead of reading a secret out of git).
+#
+# Read the plan note below before picking a plan. The free tier cannot run
+# this properly and it is better to know that now than after a deploy.
+
+services:
+  - type: web
+    name: openscrape-mcp
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: oregon
+    branch: main
+
+    # WHY NOT FREE / STARTER:
+    #
+    #   free     512 MB, no persistent disk, sleeps after 15 min idle.
+    #   starter  512 MB with a disk.
+    #   standard 2 GB.
+    #
+    # Chromium needs roughly 350-500 MB for one page on top of ~120 MB of Node,
+    # so a 512 MB instance gets OOM-killed the first time a JavaScript-heavy
+    # page escalates to the browser. Plain HTTP scraping — which is most pages
+    # and the fast path anyway — fits in 512 MB comfortably.
+    #
+    # So: `standard` if you want the browser. `starter` is fine for testing if
+    # you also set allowBrowser:false (see OPENSCRAPE_LOCKDOWN_JSON below),
+    # which makes JS-heavy pages return server HTML with a warning instead of
+    # being killed.
+    plan: standard
+
+    healthCheckPath: /health
+
+    # The cache, the SQLite index and the crawl corpus. Without a disk every
+    # deploy and restart throws away the cache that makes repeat reads nearly
+    # free, and in-flight crawl jobs lose their frontier.
+    disk:
+      name: openscrape-data
+      mountPath: /data
+      sizeGB: 10
+
+    envVars:
+      # Asked for in the dashboard rather than stored in git.
+      - key: OPENSCRAPE_MCP_TOKENS
+        sync: false
+
+      - key: OPENSCRAPE_MODE
+        value: hosted
+      - key: OPENSCRAPE_DATA_DIR
+        value: /data
+
+      # Render injects PORT and routes to it; the server picks that up on its
+      # own, so there is nothing to set here.
+
+      # Concurrent tool calls per person. Keep this low on a 2 GB instance:
+      # four people each running two browser pages is already at the limit.
+      - key: OPENSCRAPE_MCP_PER_USER
+        value: '3'
+
+      - key: OPENSCRAPE_MCP_MAX_SESSIONS
+        value: '50'
+
+      # Set this to your Render hostname once you know it. It turns on
+      # DNS-rebinding protection, which stops a web page in a team member's
+      # browser from driving this server.
+      # - key: OPENSCRAPE_MCP_ALLOWED_HOSTS
+      #   value: openscrape-mcp.onrender.com

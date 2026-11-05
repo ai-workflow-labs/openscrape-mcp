@@ -1,0 +1,69 @@
+# A shared OpenScrape instance for a team.
+#
+#   cp .env.example .env     # then put real tokens in it
+#   docker compose up -d
+#   docker compose logs -f
+#
+# The container listens on 3100. Put a reverse proxy with TLS in front before
+# anyone connects over the internet: the tokens are bearer tokens, so plain
+# HTTP hands them to anyone on the path.
+
+services:
+  openscrape:
+    build: .
+    image: openscrape-mcp:latest
+    restart: unless-stopped
+
+    # Bound to loopback on purpose. Expose it through a reverse proxy or a
+    # tunnel rather than publishing the port to the world directly.
+    ports:
+      - '127.0.0.1:3100:3100'
+
+    env_file:
+      - .env
+
+    environment:
+      OPENSCRAPE_MODE: hosted
+      OPENSCRAPE_MCP_HOST: 0.0.0.0
+      OPENSCRAPE_MCP_PORT: '3100'
+      OPENSCRAPE_DATA_DIR: /data
+
+    volumes:
+      # The cache, the SQLite index and the crawl corpus. Without this, every
+      # restart throws away the cache that makes the second read nearly free.
+      - openscrape-data:/data
+      # Optional: a lockdown file overrides the hosted defaults, key by key.
+      # - ./lockdown.json:/app/lockdown.json:ro
+
+    # Chromium is the memory cost here: roughly 100 MB per open page on top of
+    # the base process. 2 GB is a sensible floor for a small team; raise it
+    # before raising concurrency.
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+    # A browser needs more shared memory than Docker's 64 MB default, or
+    # Chromium crashes on larger pages.
+    shm_size: 1gb
+
+    # Chromium's sandbox needs these to work without --no-sandbox, which is
+    # the safer way round: keep the browser sandbox, grant the one capability.
+    security_opt:
+      - seccomp=unconfined
+    cap_add:
+      - SYS_ADMIN
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  openscrape-data:

@@ -15,7 +15,11 @@
     "serve": "tsx src/http/server.ts",
     "serve:dist": "node dist/http/server.js",
     "test": "tsx scripts/integration-test.ts",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "mcp:http": "tsx src/mcp/http.ts",
+    "mcp:http:dist": "node dist/mcp/http.js",
+    "test:http": "tsx scripts/try-mcp-http.ts",
+    "test:safety": "tsx scripts/try-hosted-safety.ts"
   },
   "engines": {
     "node": ">=22"

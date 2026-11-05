@@ -250,6 +250,29 @@ export OPENSCRAPE_WHISPER_CMD="whisper {input} --model base --output_format txt 
 Playwright is optional — without it, JavaScript-heavy pages return only server
 HTML and say so in a warning. Everything else works.
 
+## Host it for a team
+
+One instance, one URL, everyone's MCP client points at it — the Firecrawl
+replacement your team actually shares. See **[DEPLOY.md](DEPLOY.md)** for
+Render, a VPS, the plan arithmetic that decides whether it works, and the
+checks to run before sharing the URL.
+
+```bash
+npm run mcp:http        # http://127.0.0.1:3100/mcp
+```
+
+```bash
+claude mcp add --transport http openscrape https://your-host/mcp --header "Authorization: Bearer THEIR_TOKEN"
+```
+
+Tokens are per person (`OPENSCRAPE_MCP_TOKENS="alice:...,bob:..."`), so logs
+and concurrency limits name a human and revoking one person does not re-key the
+team. `OPENSCRAPE_MODE=hosted` switches off local file reads, page scripts and
+private-network targets in one go, because getting six environment variables
+individually right is not a thing people reliably do.
+
+The server refuses to bind a routable interface with no token at all.
+
 ## Connect it to Claude Desktop
 
 Add this to `%APPDATA%\Claude\claude_desktop_config.json`, then restart Claude:

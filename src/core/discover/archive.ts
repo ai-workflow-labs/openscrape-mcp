@@ -733,13 +733,62 @@ export async function fetchArchived(
     snapshot = closest.snapshot;
   }
 
-  const res = await archiveGet(snapshot.contentUrl, options.timeout ?? 45_000);
+  /**
+   * A capture the archive holds is not always a capture it will serve.
+   *
+   * Wayback returns 403 for individual captures often enough that treating the
+   * first refusal as "no archived copy" is wrong: there are usually dozens of
+   * other captures of the same page, and the next one down works. An exclusion
+   * normally applies to a date range rather than to everything, so walking
+   * outward finds a servable copy.
+   *
+   * Bounded at a few attempts, because a URL excluded outright would otherwise
+   * turn one failed lookup into a long sequence of them.
+   */
+  let res = await archiveGet(snapshot.contentUrl, options.timeout ?? 45_000);
+  const refusals: string[] = [];
+
+  if (!res.ok && !options.snapshotTimestamp) {
+    refusals.push(`${snapshot.timestamp}: ${res.error ?? `HTTP ${res.status}`}`);
+
+    const list = await listSnapshots(url, {
+      timeout: options.timeout,
+      onlyOk: !options.includeErrorCaptures,
+      limit: 40,
+    });
+
+    // Newest first: a recent capture is the most useful when it works, and the
+    // one already tried is skipped.
+    const alternatives = [...(list.snapshots ?? [])]
+      .filter((s) => s.timestamp !== snapshot.timestamp)
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .slice(0, 4);
+
+    for (const candidate of alternatives) {
+      log.debug('archive capture refused, trying another', {
+        url,
+        refused: snapshot.timestamp,
+        next: candidate.timestamp,
+      });
+      const attempt = await archiveGet(candidate.contentUrl, options.timeout ?? 45_000);
+      if (attempt.ok) {
+        snapshot = candidate;
+        res = attempt;
+        break;
+      }
+      refusals.push(`${candidate.timestamp}: ${attempt.error ?? `HTTP ${attempt.status}`}`);
+    }
+  }
+
   if (!res.ok) {
     return {
       ok: false,
       url,
       reason: 'fetch-failed',
-      message: `The archive holds capture ${snapshot.timestamp} but would not serve it (${res.error ?? `HTTP ${res.status}`}).`,
+      message:
+        refusals.length > 1
+          ? `The archive holds captures of this URL but would not serve any of the ${refusals.length} tried: ${refusals.join('; ')}.`
+          : `The archive holds capture ${snapshot.timestamp} but would not serve it (${res.error ?? `HTTP ${res.status}`}).`,
       elapsedMs: Date.now() - started,
     };
   }
