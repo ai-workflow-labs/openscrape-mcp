@@ -1,0 +1,34 @@
+node_modules/
+dist/
+*.log
+
+# Scraped data, caches and spill files. `~/.openscrape` is the default home,
+# but OPENSCRAPE_DATA_DIR can point here, so the local names are ignored too.
+.data/
+.openscrape/
+openscrape.db
+openscrape.db-*
+bodies/
+pages/
+exports/
+profiles/
+
+# The operator policy file is machine-specific, and naming allowed hosts is
+# nobody else's business.
+lockdown.json
+
+# Scratch output from the verification scripts.
+bench-ours.md
+*.tmp
+scripts/tmp-*.ts
+
+# Local environment, which is where API keys and proxy credentials belong.
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

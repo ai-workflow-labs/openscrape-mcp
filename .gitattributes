@@ -1,0 +1,12 @@
+# Normalise to LF in the repository. Without this, committing from Windows
+# stores CRLF and every diff from a Linux checkout shows the whole file as
+# changed.
+* text=auto eol=lf
+
+# Keep binary fixtures byte-exact.
+*.png binary
+*.jpg binary
+*.pdf binary
+*.wav binary
+*.mp3 binary
+*.db binary

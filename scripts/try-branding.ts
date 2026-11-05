@@ -1,0 +1,17 @@
+import { scrape } from '../src/core/scrape.js';
+const url = process.argv[2] ?? 'https://www.firecrawl.dev';
+const deep = Number(process.argv[3] ?? 0);
+const r = await scrape(url, { formats: ['branding'], maxAge: 0, brandingStylesheets: deep });
+const b = r.branding!;
+console.log(`${url}  [${r.metadata.statusCode} ${r.metadata.elapsedMs}ms]`);
+console.log(`name:   ${b.name}`);
+console.log(`theme:  ${b.themeColor ?? '(none)'}`);
+console.log(`colours (${b.colours.length}):`);
+for (const c of b.colours.slice(0, 8)) console.log(`  ${c.value}  w=${c.weight}  n=${c.count}  [${c.sources.join(',')}]`);
+console.log(`fonts:  ${b.fonts.map((f) => f.family + (f.linked ? '*' : '')).join(', ') || '(none)'}`);
+console.log(`logos:`);
+for (const l of b.logos.slice(0, 4)) console.log(`  ${l.kind}: ${l.url.slice(0, 90)}`);
+console.log(`icons:  ${b.icons.length}  manifest: ${b.manifest ? 'yes' : 'no'}`);
+console.log(`sheets: ${b.stylesheets.found} found / ${b.stylesheets.read} read`);
+for (const n of b.notes) console.log(`  note: ${n}`);
+process.exit(0);
