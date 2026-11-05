@@ -52,18 +52,72 @@ for name in alice bob carol; do echo "$name:$(openssl rand -hex 24)"; done | pas
    hostname (e.g. `openscrape-mcp.onrender.com`). That turns on DNS-rebinding
    protection, which stops a web page in someone's browser driving the server.
 
-### Testing on Starter (512 MB)
+### Running on 512 MB (free or Starter)
 
-Switch the browser off so a JavaScript-heavy page returns server HTML with a
-warning instead of being OOM-killed. Set this env var in Render:
+Use [`Dockerfile.slim`](Dockerfile.slim), which leaves Chromium out. Set
+`dockerfilePath: ./Dockerfile.slim` in `render.yaml` and drop the `disk:` block
+(free has no disks).
+
+**It fits, measured rather than estimated.** Running the slim configuration and
+then scraping a 239 KB Wikipedia article, mapping a 582-URL site and reading an
+archived page:
 
 ```
-OPENSCRAPE_LOCKDOWN_JSON={"allowBrowser":false,"maxCrawlPages":100}
+rss at start: 109 MB
+rss at end:   205 MB      (512 MB instance, Node capped at 384 MB)
 ```
 
-Everything else keeps working: HTTP scraping, map, crawl, the SEO audit, the
-archives, feeds, search. You lose `screenshot`, `interact_*`, and clean
-extraction of pages that render client-side.
+For contrast, the full image with one Chromium page open is 450-600 MB, which is
+why the free tier OOM-kills it on the first JavaScript-heavy page.
+
+What the slim image gives up — and each one says so rather than returning
+something empty:
+
+| | |
+|---|---|
+| `screenshot` | refused: *"launching a browser is disabled, so a screenshot cannot be taken"* |
+| `interact_*`, `profile_*` | unavailable |
+| JS-rendered pages | server HTML plus *"browser rendering is disabled; only server HTML was fetched"* |
+
+What still works, verified by `npx tsx scripts/try-slim.ts`:
+
+```
+PASS  example.com                  156 chars, 566ms
+PASS  a 239 KB article             412ms, rss 113 MB
+PASS  says the browser was unavailable
+PASS  screenshot refused with a reason
+PASS  map                          10 of 582 urls
+PASS  seo signals                  73 links, 211 words
+PASS  archive read                 captured 5 Nov 2026
+7 passed, 0 failed
+```
+
+So: HTTP scraping, `map`, `crawl`, `batch_scrape`, the whole SEO audit layer,
+the archives, feeds, search, the research and paper indexes, and extraction
+schemas. That is most of the tool surface.
+
+### The free tier's two real costs
+
+RAM is solvable, as above. These two are not:
+
+**No persistent disk.** The SQLite index, the byte cache and the crawl corpus
+live on disk, and on free there is none — so `/data` is container-local and
+wiped on every restart and deploy. Consequences: the cache that makes a repeat
+read 3 ms instead of 600 ms starts empty each time; `corpus_search`,
+`seo_audit` and `link_graph` only see crawls from the current uptime; and a
+crawl interrupted by a restart loses its frontier.
+
+**It sleeps after 15 minutes idle.** Background crawls and monitors are killed
+mid-run. Open MCP sessions die, so the next call returns *"Unknown or expired
+session. Re-initialize."* — a well-behaved client reconnects, but some surface
+it as a tool error. And the first request after a sleep waits for a cold start.
+
+**Verdict.** Free is genuinely fine for *testing* — one or two people trying the
+tools, confirming the URL works, checking the output shape. It is not fine as
+the thing a team relies on daily, because the cache being wiped removes the main
+speed advantage over Firecrawl, and the sleeping breaks exactly the long crawls
+you would want a shared instance for. Starter ($7) fixes the disk; Standard
+($25) fixes the RAM and lets the browser back in.
 
 ### Verify it
 
@@ -80,6 +134,133 @@ active and the instance will read local files and run page scripts for anyone
 holding a token.
 
 ---
+
+## Free options that actually meet the requirements
+
+Render's free tier fails on two things that matter here: no persistent disk and
+it sleeps. These do better.
+
+| | Always on | Disk | RAM | Browser | Cost |
+|---|---|---|---|---|---|
+| **Oracle Cloud Always Free** (ARM) | yes | 200 GB | 12 GB* | yes | free, no time limit |
+| **Your own machine + a tunnel** | while it is on | yours | yours | yes | free |
+| **Google Cloud e2-micro** | yes | 30 GB HDD | 1 GB | slim only | free, no time limit |
+| Render free | **no, sleeps** | **none** | 512 MB | slim only | free |
+| Fly.io / Railway / Koyeb | — | — | — | — | no longer meaningfully free |
+
+\* **Verify this number before planning around it.** Oracle's Always Free Arm
+allowance was widely reported in mid-2026 to have been halved from 4 OCPU /
+24 GB to 2 OCPU / 12 GB, and sources still disagree — some accounts apparently
+kept the old allowance. Check Oracle's own Always Free page for your tenancy
+rather than trusting a blog post, including this one. Even at the lower figure
+it is far more machine than Render's $25 Standard plan.
+
+### Oracle Cloud Always Free — the best free fit
+
+A real VPS with root, a persistent 200 GB volume and enough RAM to run the
+browser. Use the full [`Dockerfile`](Dockerfile), not the slim one.
+
+Two things to know before you start:
+
+- **It is ARM (Ampere A1).** `node:24-slim` is multi-arch and Playwright ships
+  arm64 Chromium, so the image is expected to build — but it has not been built
+  on arm64 here, so treat the first build as the test. Build on the instance
+  itself rather than pushing an amd64 image to it.
+- **"Out of Host Capacity" is common** in popular regions. If provisioning
+  fails, try a different availability domain or a quieter region. This is the
+  single most reported frustration with the free Arm tier.
+
+#### Step 1 — provision the instance (console, you)
+
+Oracle account signup and provisioning cannot be scripted from here; they need
+your identity and a card for verification. In the console:
+
+| Setting | Value | Why |
+|---|---|---|
+| Shape | **VM.Standard.A1.Flex** | The Arm shape with the free allowance. The AMD `E2.1.Micro` is also free but has 1 GB RAM, which rules out the browser. |
+| OCPUs / memory | Up to your Always Free allowance | Reported as 2 OCPU / 12 GB since mid-2026; check your tenancy's own page. |
+| Image | **Ubuntu 22.04 or 24.04 (aarch64)** | The script assumes `apt`. |
+| Boot volume | 50–100 GB | Minimum is ~47 GB. The cache and crawl corpus live here. |
+| SSH key | Paste your public key | Oracle does not offer password login. |
+
+If provisioning fails with **"Out of Host Capacity"**, that is the free Arm
+tier's well-known constraint, not a mistake on your part. Try another
+availability domain, then another region.
+
+#### Step 2 — open the VCN (console, you)
+
+**Networking → Virtual Cloud Networks → your VCN → Security Lists → Default**
+
+Add an ingress rule: source `0.0.0.0/0`, protocol TCP, destination ports
+`80,443`.
+
+This is separate from the instance's own firewall, and both must be open. The
+script handles the instance side; only you can do this side. Opening one and
+not the other is the most common way an Oracle deployment ends up unreachable
+while looking perfectly healthy from inside the box.
+
+#### Step 3 — point a DNS record at it
+
+An `A` record for e.g. `scrape.yourdomain.com` → the instance's public IP. This
+has to resolve *before* step 4, because Caddy proves domain control to get a
+certificate and cannot do that for a name that does not point at it yet.
+
+#### Step 4 — run the bootstrap (one command, on the instance)
+
+```bash
+ssh ubuntu@YOUR_INSTANCE_IP
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ai-workflow-labs/openscrape-mcp/main/scripts/oracle-bootstrap.sh -o bootstrap.sh && less bootstrap.sh
+```
+
+```bash
+sudo bash bootstrap.sh --domain scrape.yourdomain.com
+```
+
+Read it before running it — it is piped-to-root material, and the repo is
+private so you are the only one who can read it anyway.
+
+[`scripts/oracle-bootstrap.sh`](scripts/oracle-bootstrap.sh) does: the instance
+firewall, Docker, a 4 GB swap cushion, clone, per-person token generation
+(printed once, on the box, never through a chat window), the hostname allowlist,
+an ARM-native image build, Caddy with automatic TLS, and a health check that
+confirms `lockdown: true` before telling you it worked.
+
+It is idempotent — re-running it adds people or picks up changes without
+rebuilding what is already there.
+
+**Not tested on an Oracle instance from here.** The logic is checked (syntax,
+argument handling, the root guard firing before any mutation) but it has never
+run on Ampere hardware, so read it and expect to fix something.
+
+### Your own machine plus a tunnel — fastest to a working URL
+
+If the desktop is on most of the day, this is free, needs no cloud signup, and
+has more RAM and disk than any free tier. A Cloudflare named tunnel gives a
+stable HTTPS URL on a domain you control:
+
+```bash
+npm run mcp:http
+```
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:3100
+```
+
+The honest limitation: when the machine sleeps or reboots, the team's MCP URL
+stops answering and any running crawl dies. Fine for a few people who know
+that; not something to hand to a team as infrastructure.
+
+### Google Cloud e2-micro — works, but slim only
+
+1 GB RAM rules out the browser, so use [`Dockerfile.slim`](Dockerfile.slim) —
+which peaks at 205 MB, so it fits with room to spare. Two real constraints:
+the free persistent disk is standard HDD (slow for SQLite under load), and
+free egress is about 1 GB/month. Scraped pages are *inbound* so they do not
+count, and MCP responses are markdown, so 1 GB goes further than it sounds —
+but `crawl_export` of a large crawl would eat into it.
 
 ## Any VPS, with Docker
 

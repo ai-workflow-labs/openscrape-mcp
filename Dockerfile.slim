@@ -1,0 +1,68 @@
+# OpenScrape MCP — slim image, no browser.
+#
+# For a 512 MB instance (Render free or Starter), where the full image cannot
+# run: Chromium needs 350-500 MB for one page on top of ~120 MB of Node, so the
+# first JavaScript-heavy page gets the container OOM-killed.
+#
+# What this drops:  the Chromium binaries (719 MB) and their apt dependencies.
+# What that costs:  screenshot, interact_*, profile_*, and clean extraction of
+#                   pages that render client-side.
+# What still works: everything else, which is most of the tool surface — HTTP
+#                   scraping, map, crawl, the SEO audit, the archives, feeds,
+#                   search, the indexes, extraction schemas, research.
+#
+# The `playwright` npm package itself stays (19 MB) because the TypeScript
+# build needs its types. Only the browsers are absent, and the fetch ladder
+# already treats a missing browser as a reason to return server HTML with a
+# warning rather than to fail.
+
+# ---------------------------------------------------------------- build
+FROM node:24-slim AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+RUN npm prune --omit=dev --ignore-scripts
+
+# ---------------------------------------------------------------- runtime
+FROM node:24-slim AS runtime
+
+ENV NODE_ENV=production \
+    OPENSCRAPE_DATA_DIR=/data \
+    OPENSCRAPE_MODE=hosted \
+    OPENSCRAPE_MCP_HOST=0.0.0.0 \
+    OPENSCRAPE_MCP_PORT=3100 \
+    # Pin the ladder to HTTP. Without this the escalation would try to launch a
+    # browser that is not installed, catch the failure and warn — which works,
+    # but wastes a launch attempt per JS-heavy page. Saying so up front is
+    # cheaper and the warning is clearer.
+    OPENSCRAPE_LOCKDOWN_JSON='{"allowBrowser":false}' \
+    # 512 MB leaves little headroom, so cap per-person concurrency low. Raise
+    # it only with RAM.
+    OPENSCRAPE_MCP_PER_USER=2 \
+    OPENSCRAPE_MCP_MAX_SESSIONS=20 \
+    # Keep Node's heap under the container limit so V8 collects instead of the
+    # kernel killing the process. ~384 MB of a 512 MB instance.
+    NODE_OPTIONS=--max-old-space-size=384
+
+WORKDIR /app
+
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/package.json ./package.json
+
+RUN mkdir -p /data && chown -R node:node /data /app
+USER node
+
+EXPOSE 3100
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.OPENSCRAPE_MCP_PORT||3100)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "dist/mcp/http.js"]

@@ -8,6 +8,12 @@
 # `node:sqlite` (DatabaseSync), so controlling the Node version matters more
 # than inheriting pre-installed browser dependencies. Chromium and its system
 # libraries are installed explicitly below.
+#
+# Architecture: node:24-slim is multi-arch and Playwright ships an arm64
+# Chromium, so this is expected to build on ARM hosts (Oracle Ampere A1, AWS
+# Graviton, Apple silicon). It has not been built on arm64, so build on the
+# target rather than pushing an amd64 image to an ARM instance — the failure
+# mode there is a confusing exec-format error at runtime, not a build error.
 
 # ---------------------------------------------------------------- build
 FROM node:24-slim AS build
