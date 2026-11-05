@@ -2,23 +2,32 @@
 #
 # Bootstrap OpenScrape on a fresh Oracle Cloud Always Free instance.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ai-workflow-labs/openscrape-mcp/main/scripts/oracle-bootstrap.sh \
-#     | bash -s -- --domain scrape.yourdomain.com
+# The repository is PRIVATE, so there is no curl-pipe-to-bash one-liner: an
+# unauthenticated fetch of a private repo returns 404, and a 404 piped into
+# bash does nothing visible, which is a miserable way to start. Copy this file
+# to the instance instead:
 #
-# or, after cloning:
+#   scp scripts/oracle-bootstrap.sh ubuntu@INSTANCE_IP:~
+#   ssh ubuntu@INSTANCE_IP
+#   sudo bash oracle-bootstrap.sh --domain scrape.yourdomain.com
 #
-#   sudo bash scripts/oracle-bootstrap.sh --domain scrape.yourdomain.com
-#   sudo bash scripts/oracle-bootstrap.sh --no-tls          # testing only
+#   sudo bash oracle-bootstrap.sh --no-tls          # testing only
 #
-# Safe to re-run: every step checks before it changes anything.
+# The clone itself also needs access. The script generates a deploy key on the
+# instance and stops with instructions the first time, then picks up where it
+# left off when you run it again. Safe to re-run: every step checks before it
+# changes anything.
 #
-# Tested logic, untested host: this has not been run on an Oracle instance from
-# here, so read it before piping it to bash. That is good practice generally and
-# specifically warranted here.
+# Tested logic, untested host: this has not been run on an Oracle instance, so
+# read it before running it as root.
 
 set -euo pipefail
 
-REPO="https://github.com/ai-workflow-labs/openscrape-mcp.git"
+# SSH rather than HTTPS: a private clone over HTTPS needs a token in the URL or
+# a credential helper on a headless box, and both are worse than a deploy key
+# that can be revoked from the repository's own settings page.
+REPO="git@github.com:ai-workflow-labs/openscrape-mcp.git"
+DEPLOY_KEY="/root/.ssh/openscrape_deploy_ed25519"
 APP_DIR="/opt/openscrape"
 DOMAIN=""
 USE_TLS=1
@@ -123,12 +132,49 @@ fi
 # 4. The application
 # ---------------------------------------------------------------------------
 log "Fetching OpenScrape"
+
+# A deploy key for the clone. Read-only is enough — this box never pushes.
+if [[ ! -f "$DEPLOY_KEY" ]]; then
+  mkdir -p /root/.ssh && chmod 700 /root/.ssh
+  ssh-keygen -t ed25519 -N "" -C "openscrape deploy key ($(hostname))" -f "$DEPLOY_KEY" >/dev/null
+fi
+
+export GIT_SSH_COMMAND="ssh -i $DEPLOY_KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+
+# Check access before cloning, so the failure is a clear instruction rather
+# than git's "Repository not found", which for a private repo is what you get
+# both when it does not exist and when you simply cannot see it.
+if ! ssh -i "$DEPLOY_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+      -o BatchMode=yes -T git@github.com 2>&1 | grep -q 'successfully authenticated'; then
+  cat <<KEYSETUP
+
+------------------------------------------------------------------
+This instance cannot read the repository yet. Add its key:
+
+  https://github.com/ai-workflow-labs/openscrape-mcp/settings/keys
+
+  "Add deploy key", title: $(hostname)
+  Leave "Allow write access" UNCHECKED - this box only needs to read.
+
+$(cat "${DEPLOY_KEY}.pub")
+
+Then run this script again. It will carry on from here.
+------------------------------------------------------------------
+
+KEYSETUP
+  exit 3
+fi
+
 if [[ -d "$APP_DIR/.git" ]]; then
   git -C "$APP_DIR" pull --ff-only
 else
   git clone --depth 1 "$REPO" "$APP_DIR"
 fi
 cd "$APP_DIR"
+
+# Persist the key choice so later `git pull` in this directory works without
+# the environment variable being set.
+git config --local core.sshCommand "$GIT_SSH_COMMAND"
 
 # ---------------------------------------------------------------------------
 # 5. Tokens

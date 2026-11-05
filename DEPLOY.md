@@ -207,20 +207,30 @@ certificate and cannot do that for a name that does not point at it yet.
 
 #### Step 4 — run the bootstrap (one command, on the instance)
 
+The repository is private, so there is no `curl | bash` one-liner: an
+unauthenticated fetch of a private repo returns 404, and a 404 piped into bash
+does nothing visible, which is a miserable way to start. Copy the script over
+instead.
+
+```bash
+scp scripts/oracle-bootstrap.sh ubuntu@YOUR_INSTANCE_IP:~
+```
+
 ```bash
 ssh ubuntu@YOUR_INSTANCE_IP
 ```
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ai-workflow-labs/openscrape-mcp/main/scripts/oracle-bootstrap.sh -o bootstrap.sh && less bootstrap.sh
+sudo bash oracle-bootstrap.sh --domain scrape.yourdomain.com
 ```
 
-```bash
-sudo bash bootstrap.sh --domain scrape.yourdomain.com
-```
+The clone needs access too. The script generates a deploy key **on the
+instance** and stops the first time, printing the key and the link to add it.
+Add it, run the same command again, and it carries on from where it stopped.
+That key only needs to read, so leave "Allow write access" unchecked — the
+server never pushes.
 
-Read it before running it — it is piped-to-root material, and the repo is
-private so you are the only one who can read it anyway.
+Read the script before running it as root.
 
 [`scripts/oracle-bootstrap.sh`](scripts/oracle-bootstrap.sh) does: the instance
 firewall, Docker, a 4 GB swap cushion, clone, per-person token generation
