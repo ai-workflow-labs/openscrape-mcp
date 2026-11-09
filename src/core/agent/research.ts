@@ -596,7 +596,7 @@ export async function deepResearch(question: string, options: ResearchOptions = 
         source: 'web',
         what: 'web search',
         why: 'no search provider is configured or reachable',
-        fix: 'set OPENSCRAPE_SEARXNG_URL to a SearxNG instance, or BRAVE_SEARCH_API_KEY for the Brave free tier',
+        fix: 'set OPENSCRAPE_SEARXNG_URL to a SearxNG instance (unlimited, no card), or BRAVE_SEARCH_API_KEY (metered, $5 of credit a month)',
       });
     } else {
       const failures: string[] = [];
@@ -650,7 +650,7 @@ export async function deepResearch(question: string, options: ResearchOptions = 
           what: `web search for ${failures.length} of ${subQueries.length} sub-quer${failures.length === 1 ? 'y' : 'ies'}`,
           why: failures.join(' | '),
           fix: throttled || !webSearchWorked
-            ? 'DuckDuckGo throttles per IP. Set OPENSCRAPE_SEARXNG_URL to a SearxNG instance, or BRAVE_SEARCH_API_KEY for the Brave free tier, for unthrottled search.'
+            ? 'The keyless providers throttle per IP. For unthrottled search set OPENSCRAPE_SEARXNG_URL to a SearxNG instance (unlimited, no card), or BRAVE_SEARCH_API_KEY (metered, $5 of credit a month).'
             : undefined,
         });
       }

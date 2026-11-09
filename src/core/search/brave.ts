@@ -6,8 +6,16 @@ import type { ProviderRequest, ProviderStatus, SearchResult, SearchSource } from
  * Brave Search API.
  *
  * Brave runs its own index, so this is a genuinely independent second opinion
- * rather than another Google scraper. The free tier is 2000 queries a month at
- * one query per second, which is plenty for a local tool; get a key at
+ * rather than another Google scraper.
+ *
+ * Cost, checked against brave.com/search/api on 2026-11-09: there is no longer
+ * a free plan. Brave retired the old "2000 queries a month, free" tier and
+ * moved to metered billing at $5 per 1000 Search requests, with $5 of credit
+ * granted each month — so roughly 1000 requests a month at no charge, but a
+ * card on file is required (Brave's FAQ says this is to prevent abuse).
+ *
+ * Stated with a date because it is exactly the kind of claim that goes stale
+ * and then misleads whoever reads it out of an error message. Get a key at
  * https://api-dashboard.search.brave.com and set BRAVE_SEARCH_API_KEY.
  */
 
@@ -28,7 +36,8 @@ export function braveStatus(): ProviderStatus {
     return {
       ready: false,
       reason:
-        'Brave not configured; set BRAVE_SEARCH_API_KEY (free 2000 queries/month at api-dashboard.search.brave.com)',
+        'Brave not configured; set BRAVE_SEARCH_API_KEY. Metered at $5/1000 requests with ' +
+        '$5 of credit a month (~1000 requests) and a card required — api-dashboard.search.brave.com',
     };
   }
   return { ready: true, detail: `key …${key.slice(-4)}` };
@@ -120,8 +129,10 @@ export async function braveSearch(req: ProviderRequest): Promise<SearchResult[]>
   const maxPages = req.source === 'web' ? 3 : 1;
 
   for (let page = 0; page < maxPages && out.length < req.limit; page++) {
-    // The free plan allows one query per second, so paginating back-to-back
-    // would earn a 429 on the second page. Space them out instead.
+    // Deliberately conservative: the per-second rate limit differs by plan (the
+    // Search plan is advertised at 50 q/s, Answers at 2 q/s), and paginating
+    // back-to-back on the slower one earns a 429 on the second page. One extra
+    // second on a multi-page query is cheaper than a failed search.
     if (page > 0) await new Promise((resolve) => setTimeout(resolve, 1100));
 
     const url = new URL(ENDPOINT[req.source]);
@@ -154,7 +165,10 @@ export async function braveSearch(req: ProviderRequest): Promise<SearchResult[]>
       );
     }
     if (res.status === 429) {
-      throw new Error('Brave rate-limited the request (429). The free tier allows 1 query/second.');
+      throw new Error(
+        'Brave rate-limited the request (429) — this is the per-second rate limit for the plan ' +
+          'the key is on, not the monthly credit. Retry after a pause, or check the plan limit.',
+      );
     }
     if (res.status >= 400) {
       throw new Error(`Brave answered ${res.status}: ${body.slice(0, 200)}`);

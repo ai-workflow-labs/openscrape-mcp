@@ -438,9 +438,13 @@ phone, card numbers via Luhn, SSN, IBAN, Aadhaar and PAN.
   says why. That is the honest answer, and it is the one case where a Firecrawl
   subscription still buys something this cannot.
 - **Free search providers rate-limit.** DuckDuckGo throttles per IP — it worked
-  here (10 results in 802 ms) and then stopped for a while. Brave's free tier is
-  2,000 queries a month. Self-hosting SearxNG removes this limit entirely:
-  `docker run -d -p 8080:8080 searxng/searxng`, then set
+  here (10 results in 802 ms) and then stopped for a while, and Mojeek answers a
+  suspected bot with a CAPTCHA. Both are detected and reported rather than
+  retried into the ground, but neither is dependable on a hot IP. Brave is no
+  longer a free fallback either: as of a check on 2026-11-09 it is metered at
+  $5/1000 requests with $5 of credit a month (~1000 requests) and requires a card
+  on file. The one option that is genuinely unlimited and needs no card is
+  self-hosting SearxNG: `docker run -d -p 8080:8080 searxng/searxng`, then set
   `OPENSCRAPE_SEARXNG_URL=http://localhost:8080`.
 - **Keyless index limits.** PubMed allows 3 requests/second, GitHub 10/minute
   (and refuses code search outright); free keys lift both. govinfo and

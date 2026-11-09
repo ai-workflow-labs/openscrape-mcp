@@ -17,8 +17,8 @@ import { mojeekSearch, mojeekStatus } from './mojeek.js';
  *
  *   1. SearxNG   — self-hosted meta-search. Aggregates Google/Bing/Brave/DDG,
  *                  unlimited, best ranking. Needs OPENSCRAPE_SEARXNG_URL.
- *   2. Brave API — independent index, free tier 2000 queries/month. Needs
- *                  BRAVE_SEARCH_API_KEY.
+ *   2. Brave API — independent index, metered: $5/1000 requests with $5 of
+ *                  credit a month, card required. Needs BRAVE_SEARCH_API_KEY.
  *   3. DuckDuckGo — scraped from its JS-free HTML front end. Zero config, so
  *                  the chain always ends somewhere that works.
  *
@@ -346,9 +346,10 @@ export async function search(query: string, options: SearchOptions = {}): Promis
               `check for this IP. That is not a bug and retrying will not clear it — free search ` +
               `endpoints throttle by IP and the block lasts minutes to hours.\n\n` +
               `To make search dependable, configure one provider with a real quota:\n` +
-              `  BRAVE_SEARCH_API_KEY=...        free, 2,000 queries/month\n` +
-              `  OPENSCRAPE_SEARXNG_URL=http://localhost:8080   self-hosted, no limit\n` +
-              `                                  docker run -d -p 8080:8080 searxng/searxng\n\n` +
+              `  OPENSCRAPE_SEARXNG_URL=http://localhost:8080   self-hosted, no limit, no card\n` +
+              `                                  docker run -d -p 8080:8080 searxng/searxng\n` +
+              `  BRAVE_SEARCH_API_KEY=...        $5/1000 requests, $5 free credit a month\n` +
+              `                                  (~1000 requests); needs a card on file\n\n` +
               `Until then: other discovery routes still work without search — \`map\` for a known ` +
               `site, \`feed_discover\`, \`archive_discover\`, and \`corpus_search\` over what is ` +
               `already crawled.`,
