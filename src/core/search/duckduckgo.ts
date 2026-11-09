@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { httpFetch } from '../fetcher/http.js';
 import { log } from '../util/log.js';
+import { createPacer } from './pacing.js';
 import type { ProviderRequest, ProviderStatus, SearchResult } from './index.js';
 
 /**
@@ -164,23 +165,17 @@ function isAnomaly(html: string): boolean {
   );
 }
 
-const MIN_GAP_MS = 1100;
-const RETRY_BACKOFF_MS = [2500];
-
-/**
- * Self-imposed pacing. Hammering the HTML endpoint in a tight loop is the one
- * reliable way to get the bot wall, and once it appears it sticks around for
- * minutes. A second between requests costs nothing and avoids the cliff.
- */
-let nextAllowedAt = 0;
+const MIN_GAP_MS = 1500;
+const RETRY_BACKOFF_MS = [2500, 6000, 15_000];
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-async function pace(): Promise<void> {
-  const wait = nextAllowedAt - Date.now();
-  if (wait > 0) await sleep(wait);
-  nextAllowedAt = Date.now() + MIN_GAP_MS;
-}
+/**
+ * Shared with every other scraped provider, and serialised across concurrent
+ * callers - see pacing.ts for why the naive version silently does nothing when
+ * several searches are issued at once.
+ */
+const pacer = createPacer(MIN_GAP_MS);
 
 async function fetchPage(
   endpoint: string,
@@ -200,7 +195,7 @@ async function fetchPage(
   // One retry pass per backoff step, but only for the bot wall: a real HTTP
   // error or an empty page will not fix itself by being asked again.
   for (let attempt = 0; ; attempt++) {
-    await pace();
+    await pacer.wait();
     const page = await httpFetch(url.toString(), {
       timeout: req.timeout,
       headers: { referer: 'https://duckduckgo.com/' },
@@ -211,8 +206,11 @@ async function fetchPage(
     if (!anomaly || attempt >= RETRY_BACKOFF_MS.length) {
       return { html, status: page.status, anomaly };
     }
-    log.debug('duckduckgo bot wall, backing off', { attempt, ms: RETRY_BACKOFF_MS[attempt] });
-    await sleep(RETRY_BACKOFF_MS[attempt]);
+    const backoff = RETRY_BACKOFF_MS[attempt] as number;
+    log.debug('duckduckgo bot wall, backing off', { attempt, ms: backoff });
+    // Hold everyone else back as well, not just this caller.
+    pacer.penalise(backoff);
+    await sleep(backoff);
   }
 }
 

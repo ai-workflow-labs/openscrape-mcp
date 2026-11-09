@@ -6,6 +6,7 @@ import type { ScrapeOptions, ScrapeResult } from '../types.js';
 import { searxngSearch, searxngStatus } from './searxng.js';
 import { braveSearch, braveStatus } from './brave.js';
 import { duckduckgoSearch, duckduckgoStatus } from './duckduckgo.js';
+import { mojeekSearch, mojeekStatus } from './mojeek.js';
 
 /**
  * `search`: a web search endpoint that costs nothing.
@@ -28,7 +29,7 @@ import { duckduckgoSearch, duckduckgoStatus } from './duckduckgo.js';
 
 export type SearchSource = 'web' | 'news' | 'images';
 export type SearchTime = 'day' | 'week' | 'month' | 'year';
-export type SearchProviderName = 'searxng' | 'brave' | 'duckduckgo';
+export type SearchProviderName = 'searxng' | 'brave' | 'duckduckgo' | 'mojeek';
 
 export interface SearchOptions {
   /** Results per source. Default 10. */
@@ -133,6 +134,11 @@ const PROVIDERS: ProviderDef[] = [
   { name: 'searxng', status: searxngStatus, run: searxngSearch, sources: ['web', 'news', 'images'] },
   { name: 'brave', status: braveStatus, run: braveSearch, sources: ['web', 'news', 'images'] },
   { name: 'duckduckgo', status: duckduckgoStatus, run: duckduckgoSearch, sources: ['web'] },
+  // Last, and keyless like DuckDuckGo. Its index is smaller, so it is the
+  // backup rather than the default — but it is an independent crawler, so a
+  // DDG rate limit does not apply to it. Without this the chain had exactly
+  // one keyless provider, which is a single point of failure, not a fallback.
+  { name: 'mojeek', status: mojeekStatus, run: mojeekSearch, sources: ['web'] },
 ];
 
 /** Provider configuration as it stands right now. Handy for a status line. */
@@ -319,7 +325,37 @@ export async function search(query: string, options: SearchOptions = {}): Promis
         const detail = tried.length
           ? tried.map((a) => `${a.provider} ${a.status}${a.reason ? ` (${a.reason})` : ''}`).join('; ')
           : 'no provider in the chain handles it';
-        warnings.push(`No ${source} results: ${detail}`);
+
+        // When every keyless provider is bot-walled, the useful thing to say is
+        // not "search failed" but "search cannot work from this IP until you
+        // configure a provider with a real quota". Without this the caller
+        // retries the same blocked path and concludes the tool is broken.
+        const walled = tried.filter(
+          (a) =>
+            a.status === 'failed' &&
+            /rate.?limit|bot check|CAPTCHA|throttl|anomaly/i.test(a.reason ?? ''),
+        );
+        const keyedReady = PROVIDERS.filter(
+          (p) => p.name !== 'duckduckgo' && p.name !== 'mojeek' && p.status().ready,
+        );
+
+        if (walled.length > 0 && keyedReady.length === 0) {
+          warnings.push(
+            `No ${source} results: ${detail}.\n\n` +
+              `Every keyless provider (${walled.map((a) => a.provider).join(', ')}) is showing a bot ` +
+              `check for this IP. That is not a bug and retrying will not clear it — free search ` +
+              `endpoints throttle by IP and the block lasts minutes to hours.\n\n` +
+              `To make search dependable, configure one provider with a real quota:\n` +
+              `  BRAVE_SEARCH_API_KEY=...        free, 2,000 queries/month\n` +
+              `  OPENSCRAPE_SEARXNG_URL=http://localhost:8080   self-hosted, no limit\n` +
+              `                                  docker run -d -p 8080:8080 searxng/searxng\n\n` +
+              `Until then: other discovery routes still work without search — \`map\` for a known ` +
+              `site, \`feed_discover\`, \`archive_discover\`, and \`corpus_search\` over what is ` +
+              `already crawled.`,
+          );
+        } else {
+          warnings.push(`No ${source} results: ${detail}`);
+        }
       }
     }
     results.push(...kept);
