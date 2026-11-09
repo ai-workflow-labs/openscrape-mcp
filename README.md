@@ -445,7 +445,27 @@ phone, card numbers via Luhn, SSN, IBAN, Aadhaar and PAN.
   $5/1000 requests with $5 of credit a month (~1000 requests) and requires a card
   on file. The one option that is genuinely unlimited and needs no card is
   self-hosting SearxNG: `docker run -d -p 8080:8080 searxng/searxng`, then set
-  `OPENSCRAPE_SEARXNG_URL=http://localhost:8080`.
+  `OPENSCRAPE_SEARXNG_URL=http://localhost:8080`. Two things that are not
+  obvious until they cost you an hour:
+
+  - SearxNG ships with its **JSON API disabled**. Add `json` to `search.formats`
+    in its `settings.yml` or every query comes back as HTML and the provider
+    reports the instance as misconfigured. Turn its `limiter` off too on a
+    loopback instance — it is bot protection meant for public instances, and the
+    only client it can throttle here is you.
+  - **No Docker?** It is a Python app, so it runs from source:
+    `git clone --depth 1 https://github.com/searxng/searxng`,
+    `pip install -r requirements.txt`, then `python -m searx.webapp` with
+    `SEARXNG_SETTINGS_PATH` pointing at your settings file. On Windows two extra
+    steps apply: clone with sparse-checkout excluding `utils/templates`, whose
+    filenames contain `:` and are rejected by NTFS, and patch the unconditional
+    `import pwd` in `searx/valkeydb.py`, which is Unix-only and otherwise stops
+    `webapp.py` from loading. Both are small; neither affects searching.
+
+  Note that `OPENSCRAPE_SEARXNG_URL` is read on the operator's side, not from
+  tool input, so it is exempt from the SSRF guard by design. A sidecar SearxNG on
+  `127.0.0.1` therefore works in hosted mode without relaxing
+  `OPENSCRAPE_ALLOW_PRIVATE_TARGETS` for anything else.
 - **Keyless index limits.** PubMed allows 3 requests/second, GitHub 10/minute
   (and refuses code search outright); free keys lift both. govinfo and
   CourtListener need a free key to answer at all.
