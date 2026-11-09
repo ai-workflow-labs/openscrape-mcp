@@ -1,0 +1,44 @@
+# SearxNG settings for the OpenScrape sidecar.
+#
+# This file is mounted at /etc/searxng/settings.yml. The image's entrypoint only
+# writes a settings.yml from its own template when none exists, so mounting this
+# one takes over completely — and `use_default_settings: true` means everything
+# not named here still comes from SearxNG's defaults.
+#
+# Three settings earn their place. Each was checked against SearxNG's own
+# source rather than a blog post:
+#
+#   search.formats    THE one that matters. SearxNG's default is `[html]`, with
+#                     no environment variable to change it
+#                     (settings_defaults.py: `'formats': SettingsValue(list,
+#                     OUTPUT_FORMATS)` — no environ_name). With JSON off, every
+#                     query answers 403 or hands back an HTML page, which is
+#                     precisely the failure `search` reported before this file
+#                     existed. This is why a settings file is needed at all and
+#                     not just a few environment variables.
+#
+#   server.limiter    Bot protection meant for instances exposed to the public
+#                     internet. This one is not: it is published to no host port
+#                     and is reachable only by the openscrape container on the
+#                     compose network. Left on, it rate-limits our own calls and
+#                     also wants Valkey, which is a second container for nothing.
+#
+#   image_proxy       The image's template turns this on, which routes every
+#                     result thumbnail through SearxNG. We read result URLs out
+#                     of JSON and never render its HTML, so it is pure egress.
+#
+# secret_key is deliberately absent. It arrives from SEARXNG_SECRET in the
+# environment (settings_defaults.py line 219 declares that name), so no secret
+# is committed to git and each deployment generates its own.
+
+use_default_settings: true
+
+server:
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  formats:
+    - html
+    - json

@@ -16,6 +16,83 @@ works, and it is cheaper to read now than to debug after an OOM kill.
 | **2 GB RAM for browser use** | Chromium costs roughly 350–500 MB for one open page, on top of ~120 MB of Node. Plain HTTP scraping — most pages, and the fast path — fits in 512 MB. |
 | **Always on** | Crawls and monitors run in the background. A host that sleeps on idle kills them. |
 | **Not serverless** | Chromium, a persistent disk and long-running jobs rule out edge and function runtimes. |
+| **A second small container, for search** | `search` needs a provider, and on a server there is no free one. See below. |
+
+---
+
+## Search needs its own container
+
+This is the one part of a hosted deploy that fails quietly, so it is worth
+understanding before the deploy rather than after.
+
+`search` tries providers in order. On a datacentre IP, two of the three are
+dead ends:
+
+| | On a server |
+|---|---|
+| **DuckDuckGo** | Bot-checks a datacentre IP within a few queries. It is the no-config fallback and it is not dependable. |
+| **Brave** | No free tier as of 9 Nov 2026 — $5 per 1000 requests, $5 monthly credit, card required. |
+| **SearxNG** | Self-hosted. No key, no quota. Forwards each query to Google, Bing, Brave, DDG, Qwant and others, then merges and re-ranks. |
+
+So `docker-compose.yml` runs SearxNG as a sidecar, and sets
+`OPENSCRAPE_SEARXNG_URL=http://searxng:8080` in the compose file itself rather
+than in `.env` — a deploy should not be able to end up with a running SearxNG
+that nothing points at.
+
+Three things about it that are easy to get wrong:
+
+**SearxNG ships with its JSON API off.** Its default `search.formats` is
+`[html]`, and there is no environment variable for it — only a settings file.
+Without that file, every query comes back 403 or as an HTML page.
+[`deploy/searxng/settings.yml`](deploy/searxng/settings.yml) is mounted at
+`/etc/searxng/settings.yml` to turn JSON on. **This is the whole reason the
+sidecar needs a config file** rather than a one-line `image:` entry.
+
+**It is not published to a host port.** Only the openscrape container reaches
+it, over the compose network. That is also why its bot limiter is switched off,
+and why there is no Valkey container — Valkey exists to back that limiter.
+
+**It needs a secret, and there is no safe default.**
+
+```bash
+echo "SEARXNG_SECRET=$(openssl rand -hex 32)" >> .env
+```
+
+Compose uses `${SEARXNG_SECRET:?...}`, so it refuses to start with a clear
+message instead of bringing the stack up half-working.
+`scripts/oracle-bootstrap.sh` generates this for you, on the instance.
+
+Cost: roughly 150–250 MB of RAM. It does no rendering; the work is fanning
+queries out to the upstream engines.
+
+### Checking it, rather than assuming
+
+`/health` does not cover search, because the MCP server does not talk to
+SearxNG until someone calls `search`. Ask SearxNG directly, for JSON, which is
+the exact thing openscrape asks for:
+
+```bash
+docker compose exec searxng wget -qO- 'http://127.0.0.1:8080/search?q=ping&format=json' | head -c 200
+```
+
+A JSON body with a `"results"` key means `search` works. HTML, or a 403, means
+the settings file is not mounted. The container's own healthcheck runs this
+same query, and so does the bootstrap script.
+
+### Why the SSRF guard does not block it
+
+`http://searxng:8080` is a private address, and this server deliberately
+refuses private targets. It still works, and the reason is structural rather
+than a special case: the guard lives in `fetchPage()`
+([`src/core/fetcher/index.ts`](src/core/fetcher/index.ts)), the path every
+*caller-supplied* URL takes — scrape, crawl, map, monitor. Search providers
+call `httpFetch()` directly, so operator configuration is not subject to a
+guard that exists to constrain callers.
+
+The practical consequence: **do not set
+`OPENSCRAPE_ALLOW_PRIVATE_TARGETS` to make search work.** It is not needed, and
+it would let any token holder reach your private network and the cloud
+metadata endpoint.
 
 ---
 
@@ -51,6 +128,14 @@ for name in alice bob carol; do echo "$name:$(openssl rand -hex 24)"; done | pas
 4. After the first deploy, set `OPENSCRAPE_MCP_ALLOWED_HOSTS` to your Render
    hostname (e.g. `openscrape-mcp.onrender.com`). That turns on DNS-rebinding
    protection, which stops a web page in someone's browser driving the server.
+
+**Search is the gap in this path.** The blueprint deploys one service, so there
+is no SearxNG sidecar, and `search` will report "no provider answered" while
+every other tool works. Either point `OPENSCRAPE_SEARXNG_URL` at a SearxNG you
+run elsewhere, or add a second Render service — which Render bills separately
+and which needs an image of your own, because the JSON-API settings file cannot
+be mounted into a plain `image:` deploy. [`render.yaml`](render.yaml) has the
+sketch and the catch written out. Compose is the better-trodden path here.
 
 ### Running on 512 MB (free or Starter)
 
@@ -265,12 +350,26 @@ that; not something to hand to a team as infrastructure.
 
 ### Google Cloud e2-micro — works, but slim only
 
+Verified against Google's own free-tier pages on 9 Nov 2026: one e2-micro per
+month, **1 GB RAM**, 30 GB standard persistent disk, 1 GB/month egress, and only
+in `us-west1`, `us-central1` or `us-east1`. No end date, but Google reserves the
+right to change the limits on 30 days' notice.
+
 1 GB RAM rules out the browser, so use [`Dockerfile.slim`](Dockerfile.slim) —
-which peaks at 205 MB, so it fits with room to spare. Two real constraints:
-the free persistent disk is standard HDD (slow for SQLite under load), and
-free egress is about 1 GB/month. Scraped pages are *inbound* so they do not
-count, and MCP responses are markdown, so 1 GB goes further than it sounds —
-but `crawl_export` of a large crawl would eat into it.
+which peaks at 205 MB. The SearxNG sidecar wants another 150–250 MB, so the
+pair lands near 450 MB and still fits, though not with much spare once a large
+crawl is running. If it gets tight, drop the sidecar and point
+`OPENSCRAPE_SEARXNG_URL` at a SearxNG somewhere else.
+
+Two more constraints: the free persistent disk is standard HDD (slow for SQLite
+under load), and egress is about 1 GB/month. Scraped pages are *inbound* so they
+do not count, and MCP responses are markdown, so 1 GB goes further than it
+sounds — but `crawl_export` of a large crawl would eat into it, and so would
+SearxNG's own outbound queries, which are small but constant.
+
+Wanting the browser on Google Cloud means a paid machine — e2-small is the first
+with 2 GB. At that point Oracle's Always Free tier gives more machine for
+nothing, which is why it is the recommendation above.
 
 ## Any VPS, with Docker
 
@@ -356,10 +455,15 @@ If the instance is busy, raise RAM before raising concurrency.
 
 - `GET /health` reports `lockdown: true`.
 - `OPENSCRAPE_MCP_TOKENS` is set, one entry per person.
+- `SEARXNG_SECRET` is a real random value, not the placeholder from
+  `.env.example`.
+- SearxNG answers JSON (the one-line check above). `/health` does **not** tell
+  you this, and search is the one tool that fails without saying much.
 - TLS is in front of it (Render does this for you).
 - `OPENSCRAPE_MCP_ALLOWED_HOSTS` names your hostname.
 - `OPENSCRAPE_ALLOW_PRIVATE_TARGETS` is **not** set, unless you genuinely want
-  the instance reaching your internal network.
+  the instance reaching your internal network. It is **not** needed for the
+  SearxNG sidecar — see above for why.
 
 The last one matters more than it looks. Without the guard, any token holder can
 have the server fetch `http://169.254.169.254/` and read the host's cloud

@@ -212,6 +212,27 @@ else
   chmod 600 .env
 fi
 
+# The SearxNG sidecar's session secret. Generated on the box like the tokens,
+# and required: docker-compose.yml uses ${SEARXNG_SECRET:?...}, so compose
+# refuses to start without it rather than bringing up a half-working stack.
+#
+# The placeholder from .env.example counts as unset. Matching on the real shape
+# and not just the key means a .env copied from the example still gets a real
+# secret here instead of deploying the word REPLACE_ME.
+if grep -qE '^SEARXNG_SECRET=[0-9a-f]{32,}$' .env; then
+  echo "SearxNG secret already set; leaving it alone"
+else
+  SEARX_SECRET="$(openssl rand -hex 32)"
+  if grep -q '^SEARXNG_SECRET=' .env; then
+    sed -i "s|^SEARXNG_SECRET=.*|SEARXNG_SECRET=${SEARX_SECRET}|" .env
+  else
+    echo "SEARXNG_SECRET=${SEARX_SECRET}" >> .env
+  fi
+  unset SEARX_SECRET
+  echo "SearxNG secret generated"
+fi
+chmod 600 .env
+
 # Hosted defaults, and the hostname allowlist that turns on DNS-rebinding
 # protection.
 grep -q '^OPENSCRAPE_MODE=' .env || echo 'OPENSCRAPE_MODE=hosted' >> .env
@@ -281,6 +302,32 @@ if echo "${out:-}" | grep -q '"lockdown":true'; then
   echo "lockdown: active (local file reads, page scripts and private targets are off)"
 else
   warn "lockdown is NOT active. Set OPENSCRAPE_MODE=hosted in .env and restart."
+fi
+
+# Search is checked separately because /health does not cover it, and because
+# it fails in a quiet way: every other tool works while `search` returns "no
+# provider answered". Asking for JSON is the whole point — SearxNG ships with
+# its JSON API off, so a running container is not the same as a working
+# provider. Engine fan-out on a cold start is slow, hence the retries.
+log "Search provider"
+SEARX_OK=0
+for i in $(seq 1 10); do
+  if docker compose exec -T searxng \
+      wget -qO- 'http://127.0.0.1:8080/search?q=ping&format=json' 2>/dev/null \
+      | grep -q '"results"'; then
+    echo "searxng: answering JSON (search will work)"
+    SEARX_OK=1
+    break
+  fi
+  sleep 6
+done
+if [[ $SEARX_OK -eq 0 ]]; then
+  warn "SearxNG is not answering JSON, so \`search\` will report no provider.
+    Check:  docker compose logs --tail 50 searxng
+    The JSON API is enabled by deploy/searxng/settings.yml, mounted at
+    /etc/searxng/settings.yml — confirm it is really mounted:
+      docker compose exec searxng grep -A3 formats /etc/searxng/settings.yml
+    Everything else on the instance works without this."
 fi
 
 PUBLIC_IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || echo '<instance-ip>')"

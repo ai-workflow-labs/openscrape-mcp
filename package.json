@@ -19,7 +19,8 @@
     "mcp:http": "tsx src/mcp/http.ts",
     "mcp:http:dist": "node dist/mcp/http.js",
     "test:http": "tsx scripts/try-mcp-http.ts",
-    "test:safety": "tsx scripts/try-hosted-safety.ts"
+    "test:safety": "tsx scripts/try-hosted-safety.ts",
+    "test:deploy": "tsx scripts/try-deploy-search.ts"
   },
   "engines": {
     "node": ">=22"

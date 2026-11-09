@@ -27,6 +27,23 @@ services:
       OPENSCRAPE_MCP_HOST: 0.0.0.0
       OPENSCRAPE_MCP_PORT: '3100'
       OPENSCRAPE_DATA_DIR: /data
+      # The sidecar below, by compose service name. Set here rather than in
+      # .env so a deploy cannot end up with a running SearxNG that nothing
+      # points at — which is how `search` stayed broken on a hosted instance
+      # while every other tool worked.
+      #
+      # This is a private address, and the SSRF guard does not block it: the
+      # guard sits in fetchPage() (src/core/fetcher/index.ts), the path every
+      # *caller-supplied* URL takes. Provider calls go through httpFetch()
+      # directly, so operator config like this URL is exempt by design. That
+      # means search works here without OPENSCRAPE_ALLOW_PRIVATE_TARGETS,
+      # which must stay off — it would open the whole private network and the
+      # cloud metadata endpoint to any token holder.
+      OPENSCRAPE_SEARXNG_URL: http://searxng:8080
+
+    depends_on:
+      searxng:
+        condition: service_started
 
     volumes:
       # The cache, the SQLite index and the crawl corpus. Without this, every
@@ -63,6 +80,62 @@ services:
       interval: 30s
       timeout: 5s
       start_period: 20s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Search.
+  #
+  # Without this, `search` on a hosted instance has no working provider:
+  # DuckDuckGo bot-checks a datacentre IP within a few queries and Brave has no
+  # free tier any more (checked 9 Nov 2026 — $5/1000 requests, card required).
+  # SearxNG forwards each query to Google, Bing, Brave, DDG, Qwant and others
+  # and merges the results, with no key and no quota.
+  #
+  # Deliberately no `ports:`. It is reachable only by the openscrape container
+  # over the compose network, which is also why its bot limiter is off — see
+  # deploy/searxng/settings.yml. Publishing it would undo that.
+  #
+  # No Valkey either, unlike SearxNG's own compose file: Valkey backs the
+  # limiter, and the limiter is off.
+  # ---------------------------------------------------------------------------
+  searxng:
+    image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
+    restart: unless-stopped
+
+    environment:
+      # Required, and there is no safe default to fall back on. The `:?` makes
+      # compose refuse to start with a clear message rather than letting
+      # SearxNG fail later inside the container.
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?generate one with "openssl rand -hex 32" and put it in .env}
+
+    volumes:
+      # The image only writes a settings.yml when none is present, so this
+      # takes over. Read-write because the entrypoint chowns its config dir.
+      - ./deploy/searxng:/etc/searxng
+
+    # Engine metadata and the favicon cache. Left as the image's own declared
+    # volume rather than a named one, because the path belongs to the base
+    # image and is not ours to hard-code.
+
+    # Roughly 150-250 MB in practice. It does no rendering; the cost is the
+    # fan-out of HTTP requests to the upstream engines.
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+    # Asks SearxNG for one JSON result. This is the exact shape openscrape
+    # uses, so a passing health check means `search` works — not merely that
+    # the process is up with its JSON API still switched off.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -qO- 'http://127.0.0.1:8080/search?q=ping&format=json'
+          | grep -q '"results"'
+      interval: 60s
+      timeout: 15s
+      start_period: 45s
       retries: 3
 
 volumes:

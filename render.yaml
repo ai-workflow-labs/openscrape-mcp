@@ -69,3 +69,35 @@ services:
       # browser from driving this server.
       # - key: OPENSCRAPE_MCP_ALLOWED_HOSTS
       #   value: openscrape-mcp.onrender.com
+
+      # SEARCH. Unlike the Docker Compose path, this blueprint has no SearxNG
+      # sidecar, so `search` on a Render deploy has no working provider:
+      # DuckDuckGo bot-checks a datacentre IP within a few queries, and Brave
+      # has no free tier as of 9 Nov 2026. Every other tool is unaffected.
+      #
+      # Two ways to fix it, neither of them free:
+      #
+      #   1. Point this at a SearxNG you already run — the Oracle instance, a
+      #      VPS, anything reachable over HTTPS. Simplest if one exists.
+      #
+      #   2. Add SearxNG as a second service in this file. Render bills per
+      #      service, so this is not free, and it is NOT TESTED here — the
+      #      Compose path is the one that has been thought through. Sketch:
+      #
+      #        - type: pserv
+      #          name: searxng
+      #          runtime: image
+      #          image:
+      #            url: docker.io/searxng/searxng:latest
+      #          envVars:
+      #            - key: SEARXNG_SECRET
+      #              generateValue: true
+      #
+      #      A private service gets no public URL, which is what you want. The
+      #      catch: SearxNG's JSON API is off by default and is switched on by
+      #      a settings file (deploy/searxng/settings.yml), which a plain image
+      #      deploy has no way to mount. You would need a small image of your
+      #      own that copies that file in. That is the reason this is a comment
+      #      and not a working block.
+      # - key: OPENSCRAPE_SEARXNG_URL
+      #   value: http://searxng:8080
