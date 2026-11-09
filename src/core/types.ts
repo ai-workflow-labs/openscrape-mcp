@@ -135,6 +135,13 @@ export interface PageMetadata {
     ageText: string;
     snapshotUrl: string;
     notice: string;
+    /**
+     * The status the *archive capture* carried, which is not the status of the
+     * live URL. `statusCode` on the metadata is the live one — a dead page
+     * stays a 404 here even when a readable 2023 copy was served, because
+     * anything auditing the site has to see the 404.
+     */
+    snapshotStatus?: number;
   };
   /** The rungs of the fetch ladder that were tried, in order, with why each
    *  one was not the answer. Present only when more than one was needed. */

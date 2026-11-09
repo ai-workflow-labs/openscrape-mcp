@@ -509,6 +509,10 @@ async function visit(jobId: string, item: FrontierItem, ctx: VisitContext): Prom
     depth: item.depth,
     contentHash: hash,
     renderedWith: result.metadata.renderedWith,
+    // Carry the capture date through, so the corpus knows this body is old and
+    // whose copy it is. `status` above is already the live one, which for an
+    // archive-served page is the failure that sent us there.
+    archivedOn: result.metadata.archive?.capturedOn,
   });
 
   // The SEO row and the page's outbound edges. Stored against the URL the page

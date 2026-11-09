@@ -86,6 +86,21 @@ function db() {
     log.debug('could not add crawl_jobs.note', String(err));
   }
 
+  // archived_on: the capture date, when a page's body came from a web archive
+  // because the live URL could not be read. Without it the corpus holds
+  // years-old text with nothing saying so, and `corpus_search` hands it back as
+  // though it were current.
+  try {
+    const columns = (handle.prepare('PRAGMA table_info(crawl_pages)').all() as { name: string }[]).map(
+      (c) => c.name,
+    );
+    if (!columns.includes('archived_on')) {
+      handle.exec('ALTER TABLE crawl_pages ADD COLUMN archived_on TEXT');
+    }
+  } catch (err) {
+    log.debug('could not add crawl_pages.archived_on', String(err));
+  }
+
   migrated = true;
   return handle;
 }
@@ -400,6 +415,13 @@ export interface StoredPage {
   depth?: number;
   contentHash?: string;
   renderedWith?: string;
+  /**
+   * Capture date of the archive copy whose text is stored here, set only when
+   * the live URL was unreadable and the archive rung answered. Its presence
+   * means `markdown` is not what the URL serves today — and `status` is the
+   * live failure that sent us to the archive in the first place.
+   */
+  archivedOn?: string;
   fetchedAt?: number;
 }
 
@@ -412,13 +434,13 @@ function savePageOnce(jobId: string, page: StoredPage): void {
   handle
     .prepare(
       `INSERT INTO crawl_pages
-         (job_id, url, status, title, description, markdown, chars, depth, content_hash, rendered_with, fetched_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (job_id, url, status, title, description, markdown, chars, depth, content_hash, rendered_with, archived_on, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(job_id, url) DO UPDATE SET
          status=excluded.status, title=excluded.title, description=excluded.description,
          markdown=excluded.markdown, chars=excluded.chars, depth=excluded.depth,
          content_hash=excluded.content_hash, rendered_with=excluded.rendered_with,
-         fetched_at=excluded.fetched_at`,
+         archived_on=excluded.archived_on, fetched_at=excluded.fetched_at`,
     )
     .run(
       jobId,
@@ -431,6 +453,7 @@ function savePageOnce(jobId: string, page: StoredPage): void {
       page.depth ?? 0,
       page.contentHash ?? null,
       page.renderedWith ?? null,
+      page.archivedOn ?? null,
       page.fetchedAt ?? Date.now(),
     );
 
@@ -464,8 +487,8 @@ export function getPages(jobId: string, query: PageQuery = {}): StoredPage[] {
   const limit = query.limit ?? 50;
   const offset = query.offset ?? 0;
   const columns = query.includeMarkdown
-    ? 'url, status, title, description, markdown, chars, depth, rendered_with, fetched_at'
-    : 'url, status, title, description, chars, depth, rendered_with, fetched_at';
+    ? 'url, status, title, description, markdown, chars, depth, rendered_with, archived_on, fetched_at'
+    : 'url, status, title, description, chars, depth, rendered_with, archived_on, fetched_at';
 
   const rows = db()
     .prepare(
@@ -488,6 +511,7 @@ export function getPages(jobId: string, query: PageQuery = {}): StoredPage[] {
       chars: Number(row.chars ?? 0),
       depth: Number(row.depth ?? 0),
       renderedWith: row.rendered_with ? String(row.rendered_with) : undefined,
+      archivedOn: row.archived_on ? String(row.archived_on) : undefined,
       fetchedAt: Number(row.fetched_at ?? 0),
     };
   });
@@ -557,6 +581,12 @@ export interface CorpusHit {
   jobId: string;
   snippet: string;
   rank: number;
+  /**
+   * Capture date, when this page's text came from a web archive rather than the
+   * live URL. Callers must show it: the snippet is then an answer about the
+   * past, and a hit that does not say so is worse than no hit at all.
+   */
+  archivedOn?: string;
 }
 
 /**
@@ -576,6 +606,10 @@ export function searchCorpus(
     const params2 = opts.jobId ? [query, opts.jobId, limit * 4] : [query, limit * 4];
     const rows = db()
       .prepare(
+        // Left deliberately un-joined. Pulling archived_on in with a LEFT JOIN
+        // on crawl_pages looks tidier and silently returns zero rows: aliasing
+        // the FTS table breaks MATCH and `rank`, and the query fails open
+        // rather than erroring. The capture dates are fetched separately below.
         `SELECT url, title, job_id,
                 snippet(crawl_fts, 2, '**', '**', ' … ', 24) AS snippet,
                 rank
@@ -598,7 +632,35 @@ export function searchCorpus(
       if (!existing || hit.rank < existing.rank) bestByUrl.set(hit.url, hit);
     }
 
-    return [...bestByUrl.values()].sort((a, b) => a.rank - b.rank).slice(0, limit);
+    const hits = [...bestByUrl.values()].sort((a, b) => a.rank - b.rank).slice(0, limit);
+
+    // Attach the capture date to any hit whose text came from a web archive, so
+    // the caller cannot present years-old content as current. Done as its own
+    // query against crawl_pages because joining it into the FTS query above
+    // silently returns nothing.
+    if (hits.length) {
+      try {
+        const marks = hits.map(() => '(?, ?)').join(', ');
+        const args = hits.flatMap((h) => [h.jobId, h.url]);
+        const dated = db()
+          .prepare(
+            `SELECT url, job_id, archived_on FROM crawl_pages
+              WHERE archived_on IS NOT NULL AND (job_id, url) IN (VALUES ${marks})`,
+          )
+          .all(...(args as never[])) as Record<string, unknown>[];
+        const byKey = new Map(dated.map((r) => [`${String(r.job_id)}\u0000${String(r.url)}`, String(r.archived_on)]));
+        for (const hit of hits) {
+          const on = byKey.get(`${hit.jobId}\u0000${hit.url}`);
+          if (on) hit.archivedOn = on;
+        }
+      } catch (err) {
+        // A missing label must not cost the caller their search results, but it
+        // is the kind of silence this whole change exists to remove, so log it.
+        log.warn('could not read archive provenance for corpus hits', String(err));
+      }
+    }
+
+    return hits;
   } catch (err) {
     log.debug('corpus search failed', String(err));
     return [];

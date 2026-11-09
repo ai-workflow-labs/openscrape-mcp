@@ -68,7 +68,16 @@ export async function scrape(url: string, options: ScrapeOptions = {}): Promise<
   // is labelled an old copy at every level: renderedWith, metadata.archive, and
   // a warning that leads with the capture date. Never passed off as live.
   if (outcome.archived) {
-    return archivedResult(url, outcome.archived, opts, want, started, warnings, outcome.ladder);
+    return archivedResult(
+      url,
+      outcome.archived,
+      page.status,
+      opts,
+      want,
+      started,
+      warnings,
+      outcome.ladder,
+    );
   }
 
   if (page.blocked) {
@@ -392,6 +401,12 @@ function baseMetadata(
 function archivedResult(
   url: string,
   archived: ArchivedContent,
+  /**
+   * The status the *live* URL answered with — the reason the archive rung ran
+   * at all. This is what `statusCode` reports, so that a dead page stays dead
+   * to anything inspecting the result.
+   */
+  liveStatus: number,
   opts: ScrapeOptions,
   want: Set<ScrapeFormat>,
   started: number,
@@ -407,8 +422,13 @@ function archivedResult(
     metadata: {
       url: archived.url,
       sourceURL: url,
-      // A "revisit" record carries no status of its own; the bytes were served.
-      statusCode: archived.snapshot.statusCode ?? 200,
+      // The LIVE status, not the capture's. This line used to report
+      // `archived.snapshot.statusCode ?? 200`, which made a 404 that happened
+      // to have a readable 2023 capture look like a healthy 200 — so
+      // broken_links and seo_audit, which judge on this field, reported a site
+      // with a dead internal link as having none. The capture's own status is
+      // kept below under `archive.snapshotStatus`.
+      statusCode: liveStatus,
       contentType: archived.contentType,
       renderedWith: 'archive',
       elapsedMs: Date.now() - started,
@@ -421,6 +441,8 @@ function archivedResult(
         ageText: archived.staleness.ageText,
         snapshotUrl: archived.snapshot.contentUrl,
         notice: archived.staleness.notice,
+        // A "revisit" record carries no status of its own; the bytes were served.
+        snapshotStatus: archived.snapshot.statusCode ?? 200,
       },
       ...(ladder?.length ? { ladder } : {}),
     },

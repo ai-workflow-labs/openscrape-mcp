@@ -19,6 +19,8 @@ import {
   brokenLinks,
   redirectedPages,
   duplicateGroups,
+  archiveServedPages,
+  httpErrorPages,
   type SeoRow,
 } from './store.js';
 
@@ -122,12 +124,20 @@ export function auditCrawl(jobId: string, options: AuditOptions = {}): AuditRepo
   /* Status                                                            */
   /* ---------------------------------------------------------------- */
 
+  // From crawl_pages, not the SEO rows: a page with no extractable signals
+  // (an archive-served one, for instance) has no SEO row, and reading status
+  // from there let a dead URL pass as healthy.
+  const httpErrors = httpErrorPages(jobId);
   add(
     'http-error',
     'error',
     'Pages that answered with an error',
     'Crawled URLs whose status was 400 or above. These are live URLs the site links to.',
-    rows.filter((r) => (r.status ?? 200) >= 400).map((r) => `${r.url} — HTTP ${r.status}`),
+    httpErrors.map(
+      (r) =>
+        `${r.url} — HTTP ${r.status}` +
+        (r.archived_on ? ` (an archive copy from ${r.archived_on} was stored for it)` : ''),
+    ),
   );
 
   /* ---------------------------------------------------------------- */
@@ -362,7 +372,26 @@ export function auditCrawl(jobId: string, options: AuditOptions = {}): AuditRepo
     'error',
     'Internal links pointing at error pages',
     'The target was crawled and answered 400 or above. Each entry says how many pages link to it.',
-    broken.map((b) => `${b.to_url} — HTTP ${b.status}, linked from ${b.sources} page(s), e.g. ${b.example_from}`),
+    broken.map(
+      (b) =>
+        `${b.to_url} — HTTP ${b.status}, linked from ${b.sources} page(s), e.g. ${b.example_from}` +
+        // Say so, or the entry contradicts the stored page: dead URL, full text.
+        (b.archived_on ? ` (dead live; text below is an archive copy from ${b.archived_on})` : ''),
+    ),
+  );
+
+  // Pages whose body came from an archive because the live URL was unreadable.
+  // Every other number in this report treats them as ordinary pages, so the
+  // report has to say which ones they are.
+  const archived = archiveServedPages(jobId);
+  add(
+    'served-from-archive',
+    'warning',
+    'Pages whose content came from a web archive, not the live site',
+    'The live URL could not be read, so the crawl stored an archived copy. The text is real but dated: ' +
+      'word counts, titles and duplicate matches for these pages describe the capture, not the site today. ' +
+      'Re-crawl with archiveFallback disabled to audit only live content.',
+    archived.map((a) => `${a.url} — live HTTP ${a.status ?? '?'}, captured ${a.archived_on}`),
   );
 
   const chains = redirectedPages(jobId).filter((r) => r.chain.length >= o.maxRedirectHops);
@@ -408,7 +437,7 @@ export function auditCrawl(jobId: string, options: AuditOptions = {}): AuditRepo
     stats: {
       indexable: indexable.length,
       noindex: rows.length - indexable.length,
-      errorPages: rows.filter((r) => (r.status ?? 200) >= 400).length,
+      errorPages: httpErrors.length,
       orphans: orphans.length,
       avgWords: words.length ? Math.round(words.reduce((a, b) => a + b, 0) / words.length) : 0,
       withSchema: rows.filter((r) => r.schema_types).length,

@@ -338,6 +338,12 @@ export interface BrokenRow {
   sources: number;
   example_from: string | null;
   example_anchor: string | null;
+  /**
+   * Set when the crawl could still read this URL from a web archive. The link
+   * is broken either way — this only explains why the page has stored text
+   * despite being dead, which otherwise looks like a contradiction.
+   */
+  archived_on: string | null;
 }
 
 /**
@@ -352,16 +358,69 @@ export function brokenLinks(jobId: string): BrokenRow[] {
     .prepare(
       `SELECT l.to_url AS to_url,
               p.status AS status,
+              p.archived_on AS archived_on,
               COUNT(DISTINCT l.from_url) AS sources,
               MIN(l.from_url) AS example_from,
               MIN(l.anchor) AS example_anchor
          FROM crawl_links l
          JOIN crawl_pages p ON p.job_id = l.job_id AND p.url = l.to_url
         WHERE l.job_id = ? AND l.internal = 1 AND p.status >= 400
-        GROUP BY l.to_url, p.status
+        GROUP BY l.to_url, p.status, p.archived_on
         ORDER BY sources DESC, l.to_url`,
     )
     .all(jobId) as unknown as BrokenRow[];
+}
+
+export interface HttpErrorRow {
+  url: string;
+  status: number;
+  archived_on: string | null;
+}
+
+/**
+ * Every crawled URL that answered 400 or above.
+ *
+ * Reads crawl_pages rather than the SEO rows on purpose. A page only gets an
+ * SEO row when signals could be extracted from it, and an archive-served page
+ * gets none — so counting errors from the SEO rows reported a site with a dead
+ * URL as having zero error pages, which is the whole family of bug this
+ * function exists to close. crawl_pages has a row, with a status, for
+ * everything the crawl stored.
+ */
+export function httpErrorPages(jobId: string): HttpErrorRow[] {
+  return db()
+    .prepare(
+      `SELECT url, status, archived_on
+         FROM crawl_pages
+        WHERE job_id = ? AND status >= 400
+        ORDER BY status DESC, url`,
+    )
+    .all(jobId) as unknown as HttpErrorRow[];
+}
+
+export interface ArchiveServedRow {
+  url: string;
+  status: number | null;
+  archived_on: string;
+}
+
+/**
+ * Pages whose stored text came from a web archive rather than the live URL.
+ *
+ * Worth a rule of its own because the content is real but old: the audit's word
+ * counts, titles and duplicate fingerprints for these pages describe the site
+ * as it was on the capture date, not as it is. Silently mixing that into a
+ * report of "your site today" is how an audit ends up confidently wrong.
+ */
+export function archiveServedPages(jobId: string): ArchiveServedRow[] {
+  return db()
+    .prepare(
+      `SELECT url, status, archived_on
+         FROM crawl_pages
+        WHERE job_id = ? AND archived_on IS NOT NULL
+        ORDER BY url`,
+    )
+    .all(jobId) as unknown as ArchiveServedRow[];
 }
 
 export interface RedirectedRow {

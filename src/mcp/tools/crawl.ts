@@ -106,6 +106,13 @@ function statusReport(jobId: string, includePages: boolean, pageLimit: number, p
       lines.push(`\n## Pages (${pages.length} of ${stored})`);
       for (const page of pages) {
         lines.push(`\n### ${page.title ?? '(untitled)'}\n<${page.url}> · depth ${page.depth} · ${human(page.chars ?? 0)} chars`);
+        // Before the text, never after: the reader has to know the body is a
+        // dated archive copy at the moment they start reading it.
+        if (page.archivedOn) {
+          lines.push(
+            `\n⚠ ARCHIVED COPY from ${page.archivedOn} — the live URL answered ${page.status ?? 'an error'} when crawled, so this is not current content.`,
+          );
+        }
         if (page.markdown) lines.push(`\n${page.markdown}`);
       }
     }
@@ -114,7 +121,10 @@ function statusReport(jobId: string, includePages: boolean, pageLimit: number, p
     if (pages.length) {
       lines.push(`\n## Pages (${pages.length} of ${stored})\n`);
       for (const page of pages) {
-        lines.push(`- d${page.depth} ${human(page.chars ?? 0)}ch — ${page.title ?? '(untitled)'} <${page.url}>`);
+        const stale = page.archivedOn ? ` ⚠ ARCHIVED ${page.archivedOn}` : '';
+        lines.push(
+          `- d${page.depth} ${human(page.chars ?? 0)}ch — ${page.title ?? '(untitled)'} <${page.url}>${stale}`,
+        );
       }
       if (stored > pages.length) {
         lines.push(`\n_Use crawl_status with includeContent:true and offset to read the page text._`);
@@ -662,7 +672,12 @@ export function registerCrawlTools(server: McpServer): void {
 
       const lines = hits.map((hit, i) => {
         const title = hit.title ? ` — ${hit.title.slice(0, 70)}` : '';
-        return `${i + 1}. <${hit.url}>${title}\n   ${hit.snippet.slice(0, 300)}`;
+        // An archive-sourced hit is dated content. Saying so on the hit itself,
+        // not in a footnote, is the only placement that cannot be skimmed past.
+        const stale = hit.archivedOn
+          ? `\n   ⚠ ARCHIVED COPY from ${hit.archivedOn} — the live URL was unreadable when crawled, so this text is not current.`
+          : '';
+        return `${i + 1}. <${hit.url}>${title}${stale}\n   ${hit.snippet.slice(0, 300)}`;
       });
       return {
         content: [{ type: 'text' as const, text: `# ${hits.length} matches\n\n${lines.join('\n\n')}` }],
