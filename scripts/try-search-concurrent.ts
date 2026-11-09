@@ -6,6 +6,15 @@
  * concurrent ones. Three callers arriving together all saw a wait of zero.
  *
  *   npx tsx scripts/try-search-concurrent.ts
+ *
+ * Known noise, so nobody else chases it: on Windows this script sometimes dies
+ * at *exit* with `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING),
+ * src\win\async.c` and exit code 127, after the results have already printed.
+ * Measured at roughly one run in three. It is a libuv teardown race under tsx,
+ * not a fault in the code under test: the same three concurrent searches run
+ * against the built output with plain node exited 0 with full results four
+ * times out of four. The MCP server runs `node dist/index.js`, not tsx, so the
+ * shipped path is not affected.
  */
 import { search, providerStatuses } from '../src/core/search/index.js';
 
