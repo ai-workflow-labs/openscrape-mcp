@@ -275,23 +275,31 @@ The server refuses to bind a routable interface with no token at all.
 
 ## Connect it to Claude Desktop
 
-Add this to `%APPDATA%\Claude\claude_desktop_config.json`, then restart Claude:
+[INSTALL-LOCAL-MCP.md](INSTALL-LOCAL-MCP.md) has a one-paste script for Windows
+and macOS/Linux that clones, builds and writes the config entry for you. By hand:
+add this to `%APPDATA%\Claude\claude_desktop_config.json`, then restart Claude.
+Use the absolute path to *your* clone — `node` resolves nothing relative here,
+and a wrong path fails silently with the server simply absent from the list.
 
 ```json
 {
   "mcpServers": {
     "openscrape": {
       "command": "node",
-      "args": ["C:\\Users\\Admin\\Documents\\firecrawl-alternative\\dist\\index.js"]
+      "args": ["C:\\Users\\YOUR_NAME\\openscrape-mcp\\dist\\index.js"]
     }
   }
 }
 ```
 
+On macOS the config lives at
+`~/Library/Application Support/Claude/claude_desktop_config.json`, and the path
+looks like `/Users/you/openscrape-mcp/dist/index.js`.
+
 For Claude Code:
 
 ```bash
-claude mcp add openscrape -- node C:\Users\Admin\Documents\firecrawl-alternative\dist\index.js
+claude mcp add openscrape -- node /absolute/path/to/openscrape-mcp/dist/index.js
 ```
 
 ## Testing
