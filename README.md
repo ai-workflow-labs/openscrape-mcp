@@ -79,21 +79,22 @@ reading the code.
 
 | Family | Tools | What you get |
 |---|:--:|---|
-| [Reading pages](#reading-pages) | 3 | one URL to markdown, HTML, links, images, structured data, a summary, a screenshot — or just the part that answers a question |
-| [Browser sessions](#browser-sessions) | 7 | a page kept alive across calls: log in, fill a form, read the result |
-| [Searching](#searching) | 6 | the web, academic papers, GitHub, US government sources |
-| [Crawling & mapping](#crawling--mapping) | 8 | a site's URL list, background jobs, resume, recrawl, export, full-text search over the result |
-| [Reading the past](#reading-the-past) | 4 | any page as it was on a given date, and a diff between two dates |
-| [SEO audit](#the-seo-audit-layer) | 4 | titles, canonicals, orphans, near-duplicates, broken links, redirect chains |
-| [Feeds](#feeds) | 3 | discover, read and build a timeline from RSS / Atom / JSON feeds |
-| [Extraction](#extraction) | 5 | repeating records, schema-driven fields, `llms.txt`, OCR |
-| [Watching](#watching) | 7 | scheduled checks with real diffs |
-| [Media](#media) | 2 | speech to text, locally |
-| [Proxies & policy](#proxies--policy) | 3 | proxy health, and what this server is allowed to do |
-| [Research](#research) | 1 | a bounded multi-source investigation that hands back sourced passages |
+| **Reading pages** | 3 | one URL to markdown, HTML, links, images, structured data, a summary, a screenshot — or just the part that answers a question |
+| **Browser sessions** | 7 | a page kept alive across calls: log in, fill a form, read the result |
+| **Searching** | 6 | the web, academic papers, GitHub, US government sources |
+| **Crawling & mapping** | 8 | a site's URL list, background jobs, resume, recrawl, export, full-text search over the result |
+| **Reading the past** | 4 | any page as it was on a given date, and a diff between two dates |
+| **[SEO audit](#the-seo-audit-layer)** | 4 | titles, canonicals, orphans, near-duplicates, broken links, redirect chains |
+| **Feeds** | 3 | discover, read and build a timeline from RSS / Atom / JSON feeds |
+| **Extraction** | 5 | repeating records, schema-driven fields, `llms.txt`, OCR |
+| **Watching** | 7 | scheduled checks with real diffs |
+| **Media** | 2 | speech to text, locally |
+| **Proxies & policy** | 3 | proxy health, and what this server is allowed to do |
+| **Research** | 1 | a bounded multi-source investigation that hands back sourced passages |
 
 <details>
-<summary><b>Every tool, by name</b></summary>
+<summary><b>↓ Every tool, by name — click to expand</b></summary>
+<br>
 
 #### Reading pages
 - `scrape` — one URL → markdown, HTML, rawHtml, links, images, JSON, summary, screenshot, text, branding, or `query`
