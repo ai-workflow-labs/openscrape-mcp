@@ -217,15 +217,43 @@ docker run -d --name searxng --restart unless-stopped \
 
 ### Option B: Windows without Docker (PowerShell)
 
-Needs Python 3.11 or newer.
+Needs Python 3.11 or newer. Two Windows problems are handled in the steps below:
+
+- SearxNG's repo has four files with a `:` in their name (unused web-server
+  templates). Windows cannot create them, so `git clone` of SearxNG fails with
+  `invalid path ... :socket`. Do **not** turn off Git's NTFS safety checks to get
+  around it. Download the source as a zip instead: Python's extractor renames
+  those four files and carries on.
+- SearxNG imports `pwd`, a Unix-only module. A small stand-in file inside the
+  virtual environment fixes that without editing any SearxNG code.
 
 ```powershell
-$dir = Join-Path $HOME "searxng"
-git clone --depth 1 https://github.com/searxng/searxng.git $dir
+$dir  = Join-Path $HOME "searxng"
+$zip  = Join-Path $env:TEMP "searxng.zip"
+$tmpx = Join-Path $env:TEMP "searxng-extract"
+if (Test-Path $dir) { throw "$dir already exists - delete it or pick another folder" }
+
+# download the source and extract it with Python (renames the ':' files)
+Invoke-WebRequest -UseBasicParsing "https://github.com/searxng/searxng/archive/refs/heads/master.zip" -OutFile $zip
+if (Test-Path $tmpx) { Remove-Item -Recurse -Force $tmpx }
+python -m zipfile -e $zip $tmpx
+Move-Item (Join-Path $tmpx "searxng-master") $dir
 Set-Location $dir
+
+# virtual environment and dependencies
 python -m venv venv
 .\venv\Scripts\python.exe -m pip install -U pip setuptools wheel
 .\venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# Windows stand-in for the Unix-only 'pwd' module
+@'
+from collections import namedtuple
+struct_passwd = namedtuple('struct_passwd', 'pw_name pw_passwd pw_uid pw_gid pw_gecos pw_dir pw_shell')
+def getpwuid(uid):
+    return struct_passwd('user', '*', 0, 0, '', '', '')
+def getpwnam(name):
+    return struct_passwd(name, '*', 0, 0, '', '', '')
+'@ | Set-Content (Join-Path $dir "venv\Lib\site-packages\pwd.py") -Encoding ascii
 
 # settings: JSON output on, bound to localhost only
 $secret = [guid]::NewGuid().ToString('N')
@@ -292,6 +320,8 @@ Then fully restart Claude Desktop. The config entry does not need to change.
 | `openscrape` is not in the Local MCP servers list | You edited the wrong file, or did not fully quit Claude Desktop. Check the config path in section 3, confirm the JSON is valid, and quit from the tray icon. |
 | Server shows as failed | Run `node dist/index.js` in the repo folder. If it errors, run `npm install && npm run build` and check `node --version` is 22 or newer. |
 | `Cannot find module .../dist/index.js` | The path in the config is wrong, or the build did not run. Run `npm run build` and use the absolute path with forward slashes. |
+| `git clone` of SearxNG fails with `invalid path ... :socket` (Windows) | Windows cannot create those four files. Use the zip method in section 5, Option B. Do not disable Git's NTFS protection. |
+| SearxNG fails with `No module named 'pwd'` (Windows) | The stand-in `pwd.py` is missing. Create it in `venv\Lib\site-packages` as shown in section 5, Option B. |
 | JavaScript-heavy pages come back nearly empty | Chromium is missing. Run `npx playwright install chromium`. |
 | `search` returns "no provider answered" | SearxNG is not running, or DuckDuckGo is rate-limiting you. Start SearxNG (section 5), or wait a few minutes and retry. |
 | `git clone` fails or asks for a password | The repo is public, so no login should be needed. Check the URL and your network or proxy. If the repo has been made private since, run `gh auth login` and ask the repo owner for access. |
