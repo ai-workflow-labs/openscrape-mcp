@@ -183,3 +183,14 @@ rule('8. archive_compare — the same page across two years');
 }
 
 console.log('\ndone.');
+
+// Section 3 calls scrape(), which may start a browser, and every section above
+// opens keep-alive sockets through the shared dispatchers. Both hold the event
+// loop open, so without this the script prints "done." and then hangs forever
+// instead of exiting -- which it did, for twenty hours, before anyone noticed.
+// try-crawl.ts and try-interact.ts close the browser for the same reason, and
+// src/mcp/server.ts closes both on shutdown.
+const { closeDispatchers } = await import('../src/core/fetcher/http.js');
+await closeDispatchers();
+const { closeBrowser } = await import('../src/core/fetcher/browser.js');
+await closeBrowser();
