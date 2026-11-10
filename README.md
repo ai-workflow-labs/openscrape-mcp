@@ -220,9 +220,25 @@ throughput number is a ceiling, not how it treats a site.
 
 ## Install
 
+Needs Node 22 or newer. From a clone of this repo:
+
+```bash
+git clone https://github.com/ai-workflow-labs/openscrape-mcp.git && cd openscrape-mcp
+```
+
 ```bash
 npm install && npx playwright install chromium && npm run build
 ```
+
+That is all of it — no API key, no account, no configuration. The cache and
+index are created on first use under `~/.openscrape`.
+[INSTALL-LOCAL-MCP.md](INSTALL-LOCAL-MCP.md) does the same in one paste and
+registers the server with Claude Desktop and Claude Code for you.
+
+Verified from a fresh clone of this repository on Windows with Node 24: install,
+Chromium download and build all succeed, and the built server then answers an
+MCP handshake as `openscrape`, lists 53 tools and returns example.com as
+markdown, with no environment variables set.
 
 Transcription is optional and not installed by default, because its runtime is
 288 MB and most callers never ask for a transcript:
