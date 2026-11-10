@@ -148,7 +148,7 @@ export function registerInteractTools(server: McpServer): void {
         viewportWidth: z.number().optional().describe('Viewport width in px.'),
         viewportHeight: z.number().optional().describe('Viewport height in px.'),
         proxy: z.string().optional().describe('Proxy URL, e.g. http://user:pass@host:port.'),
-        headers: z.record(z.string()).optional().describe('Extra request headers.'),
+        headers: z.record(z.string(), z.string()).optional().describe('Extra request headers.'),
         idleTimeoutMinutes: z
           .number()
           .optional()

@@ -33,7 +33,7 @@ const fetchInput = {
   timeout: z.number().optional().describe('Per-request timeout in ms.'),
   waitForSelector: z.string().optional().describe('Browser only: wait until this CSS selector appears.'),
   waitFor: z.number().optional().describe('Browser only: extra wait after load, in ms.'),
-  headers: z.record(z.string()).optional().describe('Extra request headers.'),
+  headers: z.record(z.string(), z.string()).optional().describe('Extra request headers.'),
   proxy: z.string().optional().describe('Proxy URL, e.g. http://user:pass@host:port.'),
   mobile: z.boolean().optional().describe('Emulate a phone.'),
 };

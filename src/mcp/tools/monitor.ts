@@ -155,7 +155,7 @@ const scrapeOptionsSchema = z
     timeout: z.number().optional(),
     waitFor: z.number().optional(),
     waitForSelector: z.string().optional(),
-    headers: z.record(z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
     proxy: z.string().optional(),
     mobile: z.boolean().optional(),
   })

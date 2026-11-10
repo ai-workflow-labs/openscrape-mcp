@@ -27,11 +27,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@mozilla/readability": "^0.5.0",
+    "@mozilla/readability": "^0.6.0",
     "@xmldom/xmldom": "^0.9.12",
     "cheerio": "^1.0.0",
     "diff": "^9.0.0",
-    "fast-xml-parser": "^4.5.0",
+    "fast-xml-parser": "^5.12.0",
     "linkedom": "^0.18.0",
     "mammoth": "^1.8.0",
     "playwright": "^1.64.1",
@@ -42,7 +42,7 @@
     "undici": "^7.0.0",
     "unpdf": "^0.12.0",
     "xpath": "^0.0.36",
-    "zod": "^3.23.8"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/diff": "^7.0.2",

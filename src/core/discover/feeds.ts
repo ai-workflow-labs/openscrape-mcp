@@ -254,6 +254,13 @@ const parser = new XMLParser({
   removeNSPrefix: false,
 });
 
+// Do not add `cdataPropName` or `commentPropName` here. This builder is handed
+// the parsed body of a remote feed, so its input is whatever a stranger chose to
+// publish; GHSA-gh4j-gqv2-49f6 is an injection through exactly those two options,
+// where a `]]>` or `-->` inside the value closes the section early and whatever
+// follows becomes live markup. Without them the builder emits neither CDATA nor
+// comments, which is why that advisory never reached this call. Text and
+// attribute values are escaped either way.
 const builder = new XMLBuilder({
   ignoreAttributes: false,
   attributeNamePrefix: '@',

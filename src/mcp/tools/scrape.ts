@@ -81,7 +81,7 @@ const scrapeInput = {
   waitFor: z.number().optional().describe('Browser only: extra wait after load, in ms.'),
   waitForSelector: z.string().optional().describe('Browser only: wait until this CSS selector appears.'),
   mobile: z.boolean().optional().describe('Emulate a phone.'),
-  headers: z.record(z.string()).optional().describe('Extra request headers.'),
+  headers: z.record(z.string(), z.string()).optional().describe('Extra request headers.'),
   proxy: z.string().optional().describe('Proxy URL, e.g. http://user:pass@host:port.'),
   actions: z.array(actionSchema).optional().describe('Browser interactions to run before capture (click, write, scroll, press, screenshot...).'),
   screenshotFullPage: z.boolean().optional().describe('Capture the whole page rather than the viewport.'),
